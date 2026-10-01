@@ -36,7 +36,8 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
   const token=randomBytes(32).toString('hex');let actualPort=port;
   async function status(){
     const config=await store.getConfig(),history=await store.getHistory();
-    return {...runner.getStatus(),todayCount:history.filter(record=>countsTowardCap(record,dayKey(new Date(),config.timezone),config.timezone)).length};
+    const today=history.filter(record=>countsTowardCap(record,dayKey(new Date(),config.timezone),config.timezone));
+    return {...runner.getStatus(),todayCount:today.length,confirmedToday:today.filter(record=>record.status==='submitted').length};
   }
   const server=createServer(async(req,res)=>{
     res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
