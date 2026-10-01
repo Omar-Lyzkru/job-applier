@@ -2,10 +2,12 @@ import {mkdir,readFile,open,rename,unlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {defaultConfig,validateConfig,validateAnswers,statuses} from './domain.mjs';
+import {acquireDataOwnership} from './data-ownership.mjs';
 
 const clone = value => structuredClone(value);
 export async function createStore(dataDir) {
   await mkdir(dataDir,{recursive:true,mode:0o700});
+  const ownership=await acquireDataOwnership(dataDir);
   async function load(name,fallback,validate) {
     try { return validate(JSON.parse(await readFile(join(dataDir,`${name}.json`),'utf8'))); }
     catch (error) {
@@ -14,7 +16,8 @@ export async function createStore(dataDir) {
     }
   }
   const array = value => { if (!Array.isArray(value)) throw new Error('Expected a list'); return value; };
-  const state = {
+  let state;
+  try { state = {
     config:await load('config',defaultConfig(),validateConfig),
     answers:await load('answers',{},validateAnswers),
     questions:await load('questions',[],array),
@@ -23,8 +26,10 @@ export async function createStore(dataDir) {
       if (value.some(record=>!record.id || !record.job?.id || !statuses.has(record.status))) throw new Error('Invalid application record');
       return value;
     })
-  };
+  }; } catch(error) {await ownership.close();throw error;}
   let queue = Promise.resolve();
+  let closing=null;
+  const ensureOpen=()=>{if(closing)throw new Error('The data store is closed');};
   async function persist(name,value) {
     const path = join(dataDir,`${name}.json`), temp=`${path}.${randomUUID()}.tmp`;
     let file;
@@ -41,6 +46,7 @@ export async function createStore(dataDir) {
     }
   }
   function mutate(name,update) {
+    ensureOpen();
     const action=queue.then(async()=> {
       const next=update(clone(state[name]));
       await persist(name,next);
@@ -51,13 +57,14 @@ export async function createStore(dataDir) {
     return action;
   }
   const store = {
-    getConfig:async()=>clone(state.config),
+    getConfig:async()=>{ensureOpen();return clone(state.config);},
     saveConfig:async input=>mutate('config',()=>validateConfig(input)),
-    getAnswers:async()=>clone(state.answers),
+    getAnswers:async()=>{ensureOpen();return clone(state.answers);},
     saveAnswers:async input=>mutate('answers',()=>validateAnswers(input)),
-    getQuestions:async()=>clone(state.questions),
+    getQuestions:async()=>{ensureOpen();return clone(state.questions);},
     saveQuestions:async input=>mutate('questions',()=>array(clone(input))),
-    getHistory:async()=>clone(state.history),
+    getHistory:async()=>{ensureOpen();return clone(state.history);},
+    close(){closing ||= queue.then(()=>ownership.close());return closing;},
     async createRecord(job,status) {
       if (!job?.id || !statuses.has(status)) throw new Error('Invalid job or status');
       const record={id:randomUUID(),job:clone(job),status,reason:'',startedAt:new Date().toISOString(),attemptedAt:null,finishedAt:null};

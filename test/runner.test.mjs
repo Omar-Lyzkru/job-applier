@@ -34,7 +34,7 @@ async function setup(t,{count=3,outcome='submitted',config={},beforeGuard,afterG
     }
   };
   const runner=createRunner({store,adapter,clock});
-  t.after(()=>runner.stop());
+  t.after(async()=>{await runner.stop();await store.close();});
   return {dir,store,runner,observed,jobs,adapter};
 }
 

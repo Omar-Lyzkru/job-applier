@@ -114,7 +114,7 @@ export function resolveAnswer(field,profile,answers) {
   }
   if (['select','radio'].includes(field.type)) {
     const desired = typeof value==='boolean' ? (value?'yes':'no') : normalizeQuestion(value);
-    const match=(field.options||[]).filter(option=> normalizeQuestion(option.label)===desired || normalizeQuestion(option.value)===desired);
+    const match=(field.options||[]).filter(option=> normalizeQuestion(option.label)===desired);
     if (match.length!==1 || match[0].value==='') return {kind:'missing',reason:'Saved answer does not match an available choice'};
     return {kind:'fill',value:match[0].value,source};
   }

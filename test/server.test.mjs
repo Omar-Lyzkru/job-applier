@@ -70,3 +70,19 @@ test('history CSV quotes cells and neutralizes spreadsheet formulas',async t=>{
   assert.ok(csv.includes('"\'=1+1"'));
   assert.ok(csv.includes('"Confirmed ""sent"""'));
 });
+
+test('pending operational blockers remain visible after their answer is saved',async t=>{
+  const {store,app}=await setup(t);
+  const blockers=[
+    {key:'current city',label:'Current city',type:'unsupported',reason:'This control is not supported automatically'},
+    {key:'agree',label:'Agree',type:'checkbox',reason:'The required checkbox needs an explicit yes answer'},
+    {key:'email',label:'Email',type:'email',reason:'Could not enter the saved answer: Read-only value differs from your saved answer'},
+    {key:'years',label:'Years',type:'number',reason:'No explicit saved answer',blocker:'missing_answer'}
+  ].map(question=>({...question,jobId:'1001',options:[]}));
+  await store.saveQuestions(blockers);
+  await store.saveAnswers({'Current city':'Chicago',Agree:false,Email:'test@example.com',Years:0});
+  const data=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.deepEqual(data.questions.map(question=>question.key),['current city','agree','email']);
+  await store.saveQuestions([]);
+  assert.equal((await (await fetch(app.url+'/api/bootstrap')).json()).questions.length,0);
+});

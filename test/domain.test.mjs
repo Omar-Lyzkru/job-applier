@@ -36,6 +36,15 @@ test('all include keywords and no excluded keyword are required', () => {
   assert.equal(matchesJob('Remote Python internship, unpaid',search), false);
 });
 
+test('choice answers match displayed meanings rather than opaque internal values',()=>{
+  for(const type of ['select','radio']){
+    const field={label:'Years of experience',type,options:[{label:'No experience',value:'1'},{label:'1',value:'9'}]};
+    assert.equal(resolveAnswer(field,{}, {'years of experience':1}).value,'9');
+    assert.equal(resolveAnswer({...field,options:field.options.slice(0,1)}, {}, {'years of experience':1}).kind,'missing');
+    assert.equal(resolveAnswer(field,{}, {'years of experience':'No experience'}).value,'1');
+  }
+});
+
 test('uncertain attempts consume the local-day cap and block retries', () => {
   const date = new Date('2026-10-02T02:00:00Z');
   assert.equal(dayKey(date,'America/Chicago'),'2026-10-01');

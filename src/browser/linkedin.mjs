@@ -91,6 +91,7 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
     },
     async apply(job,{profile,answers,resumePath,dryRun=false,signal,beforeSubmit}){
       let page,submitted=false;
+      const applicationState={};
       try{
         checkStopped(signal);
         page=await navigateJob(job);
@@ -105,7 +106,7 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
           const blocked=await interruption(page);if(blocked)return finish(page,{status:'paused',reason:blocked});
           const dialog=dialogFor(page);
           if(!await dialog.count())return finish(page,{status:'failed',reason:'Unsupported application dialog layout'});
-          const filled=await fillApplicationFields(dialog,{profile,answers,resumePath,signal});
+          const filled=await fillApplicationFields(dialog,{profile,answers,resumePath,signal,applicationState,uploadTimeout:action});
           if(filled.questions.length)return finish(page,{status:'needs_answer',reason:'Required or prefilled questions need explicit answers',pendingQuestions:filled.questions.map(question=>({...question,jobId:job.id}))});
           if(filled.errors.length)return finish(page,{status:'failed',reason:filled.errors.join('; ')});
           const errors=await validationErrors(dialog);

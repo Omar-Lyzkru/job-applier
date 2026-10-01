@@ -31,7 +31,8 @@ function csvCell(value){
   return '"'+text.replaceAll('"','""')+'"';
 }
 export async function createApp({dataDir=resolve(root,'data'),store,runner,port=3210}={}){
-  store ||= await createStore(dataDir);await store.recoverPending();
+  store ||= await createStore(dataDir);
+  try{await store.recoverPending();}catch(error){await store.close();throw error;}
   runner ||= createRunner({store,adapter:createLinkedInAdapter({dataDir})});
   const token=randomBytes(32).toString('hex');let actualPort=port;
   async function status(){
@@ -54,7 +55,12 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
       const path=new URL(req.url,`http://127.0.0.1:${actualPort}`).pathname;
       if(req.method==='GET' && path==='/api/bootstrap'){
         const config=await store.getConfig(),answers=await store.getAnswers(),history=await store.getHistory();
-        const questions=(await store.getQuestions()).filter(question=>resolveAnswer(question,config.profile,answers).kind==='missing');
+        const questions=(await store.getQuestions()).filter(question=>{
+          // Saving an answer only resolves missing information. Entry/verification
+          // failures remain pending until a later successful application clears them.
+          const missing=question.blocker==='missing_answer' || (!question.blocker && (!question.reason || /^(No explicit saved answer|Saved answer is empty|Saved answer does not match|Checkbox needs|A numeric answer)/.test(question.reason)));
+          return !missing || resolveAnswer(question,config.profile,answers).kind==='missing';
+        });
         send({config,answers,questions,history:history.slice(-200).reverse(),status:await status(),readiness:readiness(config),token});return;
       }
       if(req.method==='GET' && path==='/api/status'){send(await status());return;}
@@ -96,11 +102,14 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
   return {
     get url(){return `http://127.0.0.1:${actualPort}`;},
     listen(){return new Promise((resolveListen,reject)=>{
-      const fail=error=>{server.off('listening',ready);reject(error);};
+      const fail=error=>{server.off('listening',ready);store.close().then(()=>reject(error),reject);};
       const ready=()=>{server.off('error',fail);actualPort=server.address().port;resolveListen();};
       server.once('error',fail);server.once('listening',ready);server.listen(port,'127.0.0.1');
     });},
-    async close(){await runner.stop();if(server.listening)await new Promise(resolveClose=>server.close(resolveClose));}
+    async close(){
+      const closing=server.listening?new Promise(resolveClose=>server.close(resolveClose)):Promise.resolve();
+      try{await runner.stop();await closing;}finally{await store.close();}
+    }
   };
 }
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)){

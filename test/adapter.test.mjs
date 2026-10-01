@@ -31,7 +31,37 @@ test('browser: multistep explicit answers and selected resume precede one confir
   assert.equal(fixture.state.fields.consent,true);
   assert.equal(fixture.state.fields.follow,false);
   assert.equal(fixture.state.fields.previous,'');
-  assert.equal(fixture.state.fields.resume,'selected-resume.pdf');
+  assert.match(fixture.state.fields.resume,/^selected-resume-applier-[a-f0-9-]+\.pdf$/);
+  assert.equal(fixture.state.fields.resumeContent,'%PDF-1.4\nfixture');
+});
+
+test('browser: delayed same-filename upload waits for acceptance and selects the new document',async t=>{
+  const {adapter,fixture,options}=await setup(t,'delayed-upload');
+  const result=await adapter.apply(job,options);
+  assert.equal(result.status,'submitted',JSON.stringify(result));
+  assert.equal(fixture.state.fields.resumeContent,'%PDF-1.4\nfixture');
+  assert.equal(fixture.state.fields.documentId,'new-upload');
+});
+test('browser: upload that never becomes an accepted selected document blocks submission',async t=>{
+  const {adapter,fixture,options}=await setup(t,'upload-failure');
+  const result=await adapter.apply(job,options);
+  assert.notEqual(result.status,'submitted');
+  assert.equal(fixture.state.events.length,0);
+});
+test('browser: custom required or selected answer widgets with hidden backing inputs block submission',async t=>{
+  for(const scenario of ['custom-checkbox','custom-radio','custom-listbox','custom-combobox']){
+    const {adapter,fixture,options}=await setup(t,scenario);
+    const result=await adapter.apply(job,options);
+    assert.equal(result.status,'needs_answer',scenario+': '+JSON.stringify(result));
+    assert.ok(result.pendingQuestions.some(question=>question.type==='unsupported'));
+    assert.equal(fixture.state.events.length,0);
+  }
+});
+test('browser: CV screening radio question uses its explicit saved answer',async t=>{
+  const {adapter,fixture,options}=await setup(t,'cv-question');
+  const result=await adapter.apply(job,{...options,answers:{...answers,'can you provide a cv':true}});
+  assert.equal(result.status,'submitted',JSON.stringify(result));
+  assert.equal(fixture.state.fields.cv,'yes');
 });
 test('browser: missing required answers block even when other fields were filled',async t=>{
   const {adapter,fixture,options}=await setup(t);
