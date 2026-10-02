@@ -2,15 +2,35 @@
 
 Verified on this Linux desktop with Node 24.21.0 and Playwright 1.62.1.
 
-- `npm test`: 28/28 unit, runner, storage, and localhost API tests pass.
-- `npm run test:browser`: 15/15 local Chromium fixture/dashboard scenarios pass.
+- `npm test`: 33/33 unit, runner, storage, and localhost API tests pass.
+- `npm run test:browser`: 20/20 local Chromium fixture/dashboard scenarios pass.
 - Visible Chromium launch and fixture sign-in detection pass.
 - Shell/JavaScript syntax and Git whitespace checks pass.
 - Desktop and mobile screenshots inspected by the author; no mobile document overflow.
 
-A fresh whole-change reviewer found six material issues. One regression-driven fix pass addressed exclusive data ownership, accepted/selected résumé uploads, custom ARIA control discovery, semantic choice matching, persistent operational blockers, and CV screening questions. Each regression failed before its fix. The reviewer reported no minor findings.
+The initial whole-change reviewer found six material issues. One regression-driven fix pass addressed exclusive data ownership, accepted/selected résumé uploads, custom ARIA control discovery, semantic choice matching, persistent operational blockers, and CV screening questions. Each regression failed before its fix. The reviewer reported no minor findings.
 
 Tests never contact LinkedIn or submit real applications. Live LinkedIn compatibility remains unverified until the user's profile and account are configured. Unsupported employer controls require manual completion. This build uses Linux abstract sockets for exclusive data-folder ownership within one network namespace; no stale lock-file cleanup is needed.
+
+## Settings update — 2026-10-02
+
+Bare LinkedIn and portfolio addresses now save as HTTPS URLs, including when
+the form is submitted with Enter. Invalid links identify the affected field
+and leave saved settings intact. Older links remain editable on startup;
+résumé-only updates preserve them until Settings is explicitly saved.
+
+Country and state / region use local dropdowns. Changing country clears the
+old region. Recognized abbreviations display and save as full names; unlisted
+saved locations remain available. The bundled country-region-data snapshot
+and its MIT license are recorded in `docs/third-party/country-region-data.txt`.
+
+URL normalization, dropdown migration, and legacy-link compatibility regressions
+were observed failing before their fixes. Fresh complete suites pass: 33 unit/API
+tests and 20 browser scenarios, with desktop/mobile Settings screenshots inspected
+and no mobile document overflow. A separate reviewer identified the legacy résumé
+upload regression; it was reproduced and fixed with a dedicated API test. No
+other material review findings remain. The user's running server was left in
+their terminal; restart it and refresh the page to load the update.
 
 ## Execution record
 

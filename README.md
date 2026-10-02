@@ -29,6 +29,8 @@ Open [the dashboard](http://127.0.0.1:3210). Keep the terminal running while you
 
 Profile, answer, and résumé edits take effect in the next run. **Stop** prevents further applications and waits for any submission already in flight to settle.
 
+Country and state / region are dropdowns. Choose a country first to see its regions; changing the country clears the previous region. Saved locations remain selected, recognized abbreviations save as full names, and unlisted saved values are preserved. LinkedIn and portfolio links accept addresses such as `www.linkedin.com/in/your-name` or `example.com`; saving adds `https://` automatically. Both links are optional.
+
 ## Results
 
 - **Submitted:** observed LinkedIn confirmation after Submit.

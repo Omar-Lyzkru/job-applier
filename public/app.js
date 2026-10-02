@@ -1,3 +1,5 @@
+import {countries} from './locations.js';
+
 const byId=id=>document.getElementById(id);
 const profileKeys=['firstName','lastName','email','phone','city','state','postalCode','country','linkedinUrl','website'];
 const resultNames={submitted:'Submitted',unconfirmed:'Unconfirmed',submission_pending:'Submission pending',needs_answer:'Needs answer',ready:'Ready — dry run',skipped:'Skipped',failed:'Failed'};
@@ -36,12 +38,37 @@ function syncControls(){
 }
 function fillSettings(){
   const form=byId('settings-form'),config=state.config;
-  for(const key of profileKeys)form.elements.namedItem(`profile.${key}`).value=config.profile[key]||'';
+  for(const key of profileKeys.filter(key=>!['country','state'].includes(key)))form.elements.namedItem(`profile.${key}`).value=config.profile[key]||'';
+  fillLocations(config.profile.country,config.profile.state);
   for(const key of ['titles','includeKeywords','excludeKeywords'])form.elements.namedItem(`search.${key}`).value=config.search[key].join('\n');
   for(const key of ['location','workplace'])form.elements.namedItem(`search.${key}`).value=config.search[key];
   for(const key of ['dailyCap','scanLimit','intervalSeconds','timezone'])form.elements.namedItem(key).value=config[key];
   byId('dry-run').checked=config.dryRun;
 }
+const locationKey=value=>String(value||'').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
+function findCountry(value){
+  const key=locationKey(value),aliases={usa:'US',unitedstatesofamerica:'US',uk:'GB',greatbritain:'GB'};
+  return countries.find(country=>country.code===aliases[key] || locationKey(country.code)===key || locationKey(country.name)===key);
+}
+function locationOptions(select,entries,selected,placeholder){
+  const prompt=create('option',null,placeholder);prompt.value='';
+  const match=entries.find(entry=>locationKey(entry.name)===locationKey(selected) || locationKey(entry.code)===locationKey(selected));
+  const options=entries.map(entry=>{const option=create('option',null,entry.name);option.value=entry.name;return option;});
+  if(selected&&!match){const current=create('option',null,`${selected} (saved)`);current.value=selected;options.unshift(current);}
+  select.replaceChildren(prompt,...options);select.value=match?.name||selected||'';
+}
+function fillRegions(countryValue,selected=''){
+  const country=findCountry(countryValue);
+  locationOptions(byId('settings-form').elements.namedItem('profile.state'),country?.regions||[],selected,!country?'Choose a country first':country.regions.length?'Choose a state / region':'No state / region needed');
+}
+function fillLocations(countryValue,regionValue){
+  const country=findCountry(countryValue);
+  // Recognize saved abbreviations while keeping unknown saved values available.
+  const entries=countries.map(entry=>entry===country?{...entry,code:countryValue}:entry);
+  locationOptions(byId('settings-form').elements.namedItem('profile.country'),entries,countryValue,'Choose a country');
+  fillRegions(countryValue,regionValue);
+}
+byId('settings-form').elements.namedItem('profile.country').addEventListener('change',event=>fillRegions(event.target.value));
 function jobAnchor(job,className='job-title'){
   const valid=/^\d+$/.test(String(job.id)),element=create(valid?'a':'span',className,job.title||'LinkedIn job');
   if(valid){element.href=`https://www.linkedin.com/jobs/view/${job.id}/`;element.target='_blank';element.rel='noopener noreferrer';}
@@ -138,7 +165,13 @@ byId('settings-form').addEventListener('submit',event=>{
   for(const key of ['location','workplace'])search[key]=String(values.get(`search.${key}`)||'').trim();
   const config={...state.config,profile,search,dryRun:byId('dry-run').checked};
   for(const key of ['dailyCap','scanLimit','intervalSeconds'])config[key]=Number(values.get(key));config.timezone=String(values.get('timezone')||'').trim();
-  perform(()=>api('/api/config',config),'Settings saved');
+  perform(async()=>{
+    const result=await api('/api/config',config);
+    for(const key of ['linkedinUrl','website']){
+      const input=byId('settings-form').elements.namedItem(`profile.${key}`);
+      if(input.value.trim()===profile[key])input.value=result.config.profile[key];
+    }
+  },'Settings saved');
 });
 byId('resume-upload').addEventListener('change',event=>{
   const file=event.target.files[0];if(!file)return;

@@ -33,12 +33,32 @@ function integer(value,name,min,max) {
   if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be between ${min} and ${max}`);
   return value;
 }
-export function validateConfig(input) {
+function profileUrl(value,label) {
+  if (!value) return '';
+  try {
+    if (/[\s\\]/.test(value)) throw new Error();
+    const hasScheme=/^https?:\/\//i.test(value);
+    const hasPort=/^[^/:]+\.\w+:\d+(?:[/?#]|$)/.test(value);
+    if (!hasScheme && /^[a-z][a-z\d+.-]*:/i.test(value) && !hasPort) throw new Error();
+    const url=new URL(hasScheme?value:value.startsWith('//')?`https:${value}`:`https://${value}`);
+    const labels=url.hostname.replace(/\.$/,'').split('.');
+    const validHost=url.hostname.startsWith('[') || ((labels.length>1 || url.hostname==='localhost') && labels.every(part=>/^[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?$/i.test(part)));
+    if (!['https:','http:'].includes(url.protocol) || !validHost || url.username || url.password) throw new Error();
+    return url.href;
+  } catch {
+    throw new Error(`${label} must be a valid web address, such as ${label==='LinkedIn profile URL'?'linkedin.com/in/your-name':'example.com'}`);
+  }
+}
+export function validateConfig(input,{profileLinks=true}={}) {
   object(input,'Settings');
   const config = defaultConfig();
   if (input.profile !== undefined) {
     object(input.profile,'Profile');
     for (const key of profileKeys) if (input.profile[key] !== undefined) config.profile[key] = string(input.profile[key],key);
+  }
+  if (profileLinks) {
+    config.profile.linkedinUrl=profileUrl(config.profile.linkedinUrl,'LinkedIn profile URL');
+    config.profile.website=profileUrl(config.profile.website,'Website / portfolio');
   }
   if (input.search !== undefined) {
     object(input.search,'Search');

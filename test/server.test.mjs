@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,readFile} from 'node:fs/promises';
+import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {request} from 'node:http';
@@ -85,4 +85,32 @@ test('pending operational blockers remain visible after their answer is saved',a
   assert.deepEqual(data.questions.map(question=>question.key),['current city','agree','email']);
   await store.saveQuestions([]);
   assert.equal((await (await fetch(app.url+'/api/bootstrap')).json()).questions.length,0);
+});
+
+test('API normalizes bare profile URLs and invalid links leave saved settings intact',async t=>{
+  const {app,send}=await setup(t);
+  const response=await send('/api/config',{profile:{firstName:'Test',linkedinUrl:'www.linkedin.com/in/test-applicant',website:'portfolio.example/work'}});
+  assert.equal(response.status,200);
+  const previous=(await response.json()).config;
+  assert.equal(previous.profile.linkedinUrl,'https://www.linkedin.com/in/test-applicant');
+  assert.equal(previous.profile.website,'https://portfolio.example/work');
+  const rejected=await send('/api/config',{...previous,profile:{...previous.profile,firstName:'Changed',website:'not a link'}});
+  assert.equal(rejected.status,400);
+  assert.match((await rejected.json()).error,/Website \/ portfolio/);
+  const current=(await (await fetch(app.url+'/api/bootstrap')).json()).config;
+  assert.deepEqual(current,previous);
+});
+
+test('resume uploads preserve legacy profile links without requiring a settings edit',async t=>{
+  const dir=await mkdtemp(join(tmpdir(),'job-applier-legacy-resume-'));
+  await writeFile(join(dir,'config.json'),JSON.stringify({profile:{firstName:'Test',website:'old incomplete link'}}));
+  const app=await createApp({dataDir:dir,runner:{getStatus:()=>({state:'idle',message:'Ready',todayCount:0}),stop:async()=>{}},port:0});
+  await app.listen();t.after(async()=>{await app.close();await rm(dir,{recursive:true,force:true});});
+  const previous=await (await fetch(app.url+'/api/bootstrap')).json();
+  const response=await fetch(app.url+'/api/resume',{method:'POST',headers:{'X-App-Token':previous.token,'X-Filename':'fixture.pdf','Content-Type':'application/octet-stream'},body:'%PDF-fixture'});
+  assert.equal(response.status,200);
+  const current=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.equal(current.config.profile.website,'old incomplete link');
+  assert.equal(current.config.profile.firstName,'Test');
+  assert.equal(current.config.resume.filename,'fixture.pdf');
 });

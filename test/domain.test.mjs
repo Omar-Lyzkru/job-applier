@@ -55,3 +55,19 @@ test('uncertain attempts consume the local-day cap and block retries', () => {
   assert.equal(blocksRetry({status:'needs_answer'}),false);
   assert.equal(countsTowardCap({status:'ready'},'2026-10-01','America/Chicago'),false);
 });
+
+test('profile links without a scheme are saved as HTTPS URLs',()=>{
+  const config=validateConfig({profile:{linkedinUrl:' www.linkedin.com/in/test-applicant ',website:'portfolio.example/projects?view=work#about'}});
+  assert.equal(config.profile.linkedinUrl,'https://www.linkedin.com/in/test-applicant');
+  assert.equal(config.profile.website,'https://portfolio.example/projects?view=work#about');
+  assert.equal(validateConfig({profile:{website:'http://portfolio.example/work'}}).profile.website,'http://portfolio.example/work');
+  assert.equal(validateConfig({profile:{website:'PORTFOLIO.example:8443/work?tab=projects#top'}}).profile.website,'https://portfolio.example:8443/work?tab=projects#top');
+  assert.equal(validateConfig({profile:{linkedinUrl:'',website:''}}).profile.website,'');
+});
+
+test('profile links reject malformed URLs and non-web protocols with the field name',()=>{
+  for(const value of ['not a link','javascript:alert(1)','ftp://files.example/resume','mailto:test@example.com','https://','https://example..com','https://example.com/a b','https://user:password@example.com']){
+    assert.throws(()=>validateConfig({profile:{linkedinUrl:value}}),/LinkedIn profile URL/);
+    assert.throws(()=>validateConfig({profile:{website:value}}),/Website \/ portfolio/);
+  }
+});

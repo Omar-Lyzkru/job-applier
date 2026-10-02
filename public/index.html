@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Job Applier</title><link rel="stylesheet" href="/styles.css"><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Job Applier</title><link rel="stylesheet" href="/styles.css"><script src="/app.js" type="module"></script></head>
 <body>
   <aside class="sidebar">
     <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 19 14-14M7 5h12v12"/></svg></span><span>Job Applier<small>Your next chapter.</small></span></a>
@@ -33,9 +33,9 @@
           <article class="panel form-panel"><div class="panel-heading"><div><h2>Application profile</h2><p>Enter the details you want sent to employers.</p></div></div><div class="form-grid">
             <label>First name<input name="profile.firstName" autocomplete="given-name"></label><label>Last name<input name="profile.lastName" autocomplete="family-name"></label>
             <label>Email<input name="profile.email" type="email" autocomplete="email"></label><label>Phone<input name="profile.phone" type="tel" autocomplete="tel"></label>
-            <label>City<input name="profile.city" autocomplete="address-level2"></label><label>State / region<input name="profile.state" autocomplete="address-level1"></label>
-            <label>Postal code<input name="profile.postalCode" autocomplete="postal-code"></label><label>Country<input name="profile.country" autocomplete="country-name"></label>
-            <label class="span-2">LinkedIn profile URL<input name="profile.linkedinUrl" type="url" placeholder="https://www.linkedin.com/in/…"></label><label class="span-2">Website / portfolio<input name="profile.website" type="url" placeholder="https://…"></label>
+            <label>City<input name="profile.city" autocomplete="address-level2"></label><label>Country<select name="profile.country" autocomplete="country-name"><option value="">Choose a country</option></select></label>
+            <label>State / region<select name="profile.state" autocomplete="address-level1"><option value="">Choose a country first</option></select></label><label>Postal code<input name="profile.postalCode" autocomplete="postal-code"></label>
+            <div class="field span-2"><label for="linkedin-url">LinkedIn profile URL</label><input id="linkedin-url" name="profile.linkedinUrl" inputmode="url" placeholder="linkedin.com/in/your-name" aria-describedby="linkedin-url-help"><small id="linkedin-url-help">We'll add https:// if you leave it out.</small></div><div class="field span-2"><label for="website-url">Website / portfolio</label><input id="website-url" name="profile.website" inputmode="url" placeholder="example.com" aria-describedby="website-url-help"><small id="website-url-help">We'll add https:// if you leave it out.</small></div>
           </div><div class="resume-box"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H5v20h14V7l-5-5Z M14 2v6h5M8 13h8M8 17h5"/></svg><div><b id="resume-name">No résumé uploaded</b><p id="resume-detail">PDF, DOC, or DOCX · up to 2 MB</p></div><label class="button upload-label">Upload résumé<input id="resume-upload" type="file" accept=".pdf,.doc,.docx"></label></div></article>
           <article class="panel form-panel"><div class="panel-heading"><div><h2>Find the right roles</h2><p>Search preferences for your next run.</p></div></div><div class="form-grid">
             <div class="field span-2"><label for="search-titles">Job titles</label><textarea id="search-titles" name="search.titles" rows="3" aria-describedby="titles-help" placeholder="Software Engineer&#10;Backend Developer"></textarea><small id="titles-help">One title per line</small></div>

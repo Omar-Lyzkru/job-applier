@@ -79,7 +79,7 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
         const path=join(directory,name),file=await open(path,'wx',0o600);
         try{await file.writeFile(body);await file.sync();}finally{await file.close();}
         const resume={path,filename:name,size:body.length};
-        const config=await store.getConfig();await store.saveConfig({...config,resume});send({resume});return;
+        await store.saveResume(resume);send({resume});return;
       }
       if(req.method==='POST' && path==='/api/config'){
         const input=await readJson(req);if(!input||typeof input!=='object'||Array.isArray(input))throw failure('Settings must be an object');
@@ -89,7 +89,7 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
       if(req.method==='POST' && path==='/api/run'){await runner.start(await readJson(req));send(await status());return;}
       if(req.method==='POST' && path==='/api/stop'){await readJson(req);await runner.stop();send(await status());return;}
       if(req.method==='POST' && path==='/api/browser'){await readJson(req);await runner.openBrowser();send(await status());return;}
-      const staticFiles={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/styles.css':'styles.css'};
+      const staticFiles={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/locations.js':'locations.js','/styles.css':'styles.css'};
       if(req.method==='GET' && Object.hasOwn(staticFiles,path)){
         const file=join(root,'public',staticFiles[path]);
         const types={'.html':'text/html','.js':'text/javascript','.css':'text/css'};

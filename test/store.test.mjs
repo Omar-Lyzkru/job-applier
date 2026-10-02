@@ -85,3 +85,15 @@ test('data-directory ownership rejects another process and survives abrupt owner
   assert.equal((await recovered.getHistory()).length,1);
   assert.equal((await recovered.getHistory())[0].status,'unconfirmed');
 });
+
+test('legacy profile links remain editable instead of preventing app startup',async t=>{
+  const dir=await temporary(t);
+  await writeFile(join(dir,'config.json'),JSON.stringify({profile:{firstName:'Test',linkedinUrl:'old incomplete link',website:'ftp://files.example/work'}}));
+  const store=await createStore(dir);t.after(()=>store.close());
+  const previous=await store.getConfig();
+  assert.equal(previous.profile.firstName,'Test');
+  assert.equal(previous.profile.linkedinUrl,'old incomplete link');
+  await assert.rejects(store.saveConfig(previous),/LinkedIn profile URL/);
+  await store.saveConfig({...previous,profile:{...previous.profile,linkedinUrl:'linkedin.com/in/test-applicant',website:''}});
+  assert.equal((await store.getConfig()).profile.linkedinUrl,'https://linkedin.com/in/test-applicant');
+});

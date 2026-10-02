@@ -59,3 +59,98 @@ test('browser: dashboard setup, answers, controls and CSV work without rendering
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:resolve('test-artifacts/dashboard-mobile.png'),fullPage:true});
 });
+
+async function settingsPage(t,profile={}){
+  const dir=await mkdtemp(join(tmpdir(),'job-applier-settings-')),store=await createStore(dir);
+  await store.saveConfig({profile});
+  const runner={getStatus:()=>({state:'idle',todayCount:0,message:'Ready',currentJob:null}),stop:async()=>{}};
+  const app=await createApp({dataDir:dir,store,runner,port:0});await app.listen();
+  const browser=await chromium.launch({headless:true}),page=await browser.newPage();
+  page.setDefaultTimeout(5000);
+  t.after(async()=>{await browser.close();await app.close();await rm(dir,{recursive:true,force:true});});
+  await page.goto(app.url);
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#save-settings').disabled);
+  return {store,page};
+}
+
+test('browser: saving bare profile links works with Enter and persists normalized URLs',async t=>{
+  const {store,page}=await settingsPage(t);
+  await page.getByLabel('LinkedIn profile URL',{exact:true}).fill('www.linkedin.com/in/test-applicant');
+  await page.getByLabel('Website / portfolio',{exact:true}).fill('portfolio.example/work#about');
+  await page.getByLabel('Website / portfolio',{exact:true}).press('Enter');
+  await page.getByText('Settings saved',{exact:true}).waitFor();
+  assert.equal((await store.getConfig()).profile.linkedinUrl,'https://www.linkedin.com/in/test-applicant');
+  assert.equal((await store.getConfig()).profile.website,'https://portfolio.example/work#about');
+  await page.reload();await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#save-settings').disabled);
+  assert.equal(await page.getByLabel('LinkedIn profile URL',{exact:true}).inputValue(),'https://www.linkedin.com/in/test-applicant');
+});
+
+test('browser: country and state dropdowns preserve saved values and clear stale states on country changes',async t=>{
+  const {store,page}=await settingsPage(t,{country:'USA',state:'Texas'});
+  const country=page.getByRole('combobox',{name:'Country',exact:true}),region=page.getByRole('combobox',{name:'State / region',exact:true});
+  assert.equal(await country.locator('option:checked').textContent(),'United States');
+  assert.equal(await region.inputValue(),'Texas');
+  assert.ok(await country.locator('option').count()>200);
+  await region.selectOption({label:'California'});
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.getByText('Settings saved',{exact:true}).waitFor();
+  assert.equal((await store.getConfig()).profile.country,'United States');
+  assert.equal((await store.getConfig()).profile.state,'California');
+  await country.selectOption({label:'Canada'});
+  assert.equal(await region.inputValue(),'');
+  assert.equal(await region.locator('option').filter({hasText:'Texas'}).count(),0);
+  await region.selectOption({label:'Ontario'});
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Settings saved'&&!document.querySelector('#save-settings').disabled);
+  assert.equal((await store.getConfig()).profile.country,'Canada');
+  assert.equal((await store.getConfig()).profile.state,'Ontario');
+  await page.reload();await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#save-settings').disabled);
+  assert.equal(await country.inputValue(),'Canada');assert.equal(await region.inputValue(),'Ontario');
+});
+
+test('browser: dropdowns keep unlisted saved locations until explicitly changed',async t=>{
+  const {store,page}=await settingsPage(t,{country:'Custom country',state:'Custom region'});
+  const country=page.getByRole('combobox',{name:'Country',exact:true}),region=page.getByRole('combobox',{name:'State / region',exact:true});
+  assert.equal(await country.inputValue(),'Custom country');assert.equal(await region.inputValue(),'Custom region');
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.getByText('Settings saved',{exact:true}).waitFor();
+  assert.equal((await store.getConfig()).profile.state,'Custom region');
+  await country.selectOption({label:'United States'});
+  assert.equal(await region.inputValue(),'');
+  await region.selectOption({label:'Texas'});
+  assert.equal(await region.inputValue(),'Texas');
+});
+
+test('browser: an invalid profile link explains the field and keeps saved settings',async t=>{
+  const {store,page}=await settingsPage(t,{firstName:'Test',linkedinUrl:'https://www.linkedin.com/in/test-applicant'});
+  await page.getByLabel('First name',{exact:true}).fill('Changed');
+  await page.getByLabel('LinkedIn profile URL',{exact:true}).fill('not a link');
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.getByText('LinkedIn profile URL must be a valid web address, such as linkedin.com/in/your-name',{exact:true}).waitFor();
+  assert.equal((await store.getConfig()).profile.firstName,'Test');
+  assert.equal(await page.getByLabel('First name',{exact:true}).inputValue(),'Changed');
+  await page.getByLabel('LinkedIn profile URL',{exact:true}).fill('www.linkedin.com/in/new-applicant');
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.getByText('Settings saved',{exact:true}).waitFor();
+  assert.equal((await store.getConfig()).profile.firstName,'Changed');
+  assert.equal(await page.getByLabel('LinkedIn profile URL',{exact:true}).inputValue(),'https://www.linkedin.com/in/new-applicant');
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.screenshot({path:resolve('test-artifacts/settings-mobile.png'),fullPage:true});
+  await page.setViewportSize({width:1360,height:960});
+  await page.screenshot({path:resolve('test-artifacts/settings-desktop.png'),fullPage:true});
+});
+
+test('browser: recognized location abbreviations save as full names for application choices',async t=>{
+  const {store,page}=await settingsPage(t,{country:'U.S.A.',state:'TX'});
+  assert.equal(await page.getByRole('combobox',{name:'Country',exact:true}).inputValue(),'United States');
+  assert.equal(await page.getByRole('combobox',{name:'State / region',exact:true}).inputValue(),'Texas');
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.getByText('Settings saved',{exact:true}).waitFor();
+  assert.equal((await store.getConfig()).profile.country,'United States');
+  assert.equal((await store.getConfig()).profile.state,'Texas');
+});

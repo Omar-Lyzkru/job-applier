@@ -18,7 +18,9 @@ export async function createStore(dataDir) {
   const array = value => { if (!Array.isArray(value)) throw new Error('Expected a list'); return value; };
   let state;
   try { state = {
-    config:await load('config',defaultConfig(),validateConfig),
+    // Older builds accepted arbitrary profile links. Keep them editable on load;
+    // every settings save uses the current URL validation and normalization.
+    config:await load('config',defaultConfig(),value=>validateConfig(value,{profileLinks:false})),
     answers:await load('answers',{},validateAnswers),
     questions:await load('questions',[],array),
     history:await load('history',[],value=> {
@@ -59,6 +61,7 @@ export async function createStore(dataDir) {
   const store = {
     getConfig:async()=>{ensureOpen();return clone(state.config);},
     saveConfig:async input=>mutate('config',()=>validateConfig(input)),
+    saveResume:async resume=>mutate('config',config=>validateConfig({...config,resume},{profileLinks:false})),
     getAnswers:async()=>{ensureOpen();return clone(state.answers);},
     saveAnswers:async input=>mutate('answers',()=>validateAnswers(input)),
     getQuestions:async()=>{ensureOpen();return clone(state.questions);},
