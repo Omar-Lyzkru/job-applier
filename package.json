@@ -8,11 +8,15 @@
   },
   "scripts": {
     "start": "node src/server.mjs",
-    "test": "node --test --test-isolation=none test/domain.test.mjs test/store.test.mjs test/runner.test.mjs test/server.test.mjs test/session.test.mjs",
+    "test": "node --test --test-isolation=none test/domain.test.mjs test/store.test.mjs test/runner.test.mjs test/server.test.mjs test/session.test.mjs test/resume-keywords.test.mjs",
     "test:browser": "node scripts/test-browser.mjs",
     "browser:install": "node scripts/install-browser.mjs"
   },
   "dependencies": {
-    "playwright": "1.62.1"
+    "mammoth": "1.13.0",
+    "pdfjs-dist": "6.3.289",
+    "playwright": "1.62.1",
+    "word-extractor": "1.0.4",
+    "yauzl": "3.4.0"
   }
 }

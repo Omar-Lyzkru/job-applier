@@ -5,6 +5,7 @@ const profileKeys=['firstName','lastName','email','phone','city','state','postal
 const resultNames={submitted:'Submitted',unconfirmed:'Unconfirmed',submission_pending:'Submission pending',needs_answer:'Needs answer',ready:'Ready — dry run',skipped:'Skipped',failed:'Failed'};
 const pageCopy={dashboard:['Your application workspace','Find matching jobs and apply using your saved profile.'],settings:['Set up your next search','Your profile, résumé, and preferences for the next run.'],answers:['Saved answers','Your answers to the questions employers ask.'],history:['Application history','A record of what was submitted, skipped, or needs attention.']};
 let state=null,ready=false,busy=false,view='dashboard',toastTimer,questionSignature='',answerSignature='',controlId=0,committedCountry='';
+let recommendationResume=null,recommendationLoading=false,recommendationRequest=0;
 const create=(tag,className,text)=>{const element=document.createElement(tag);if(className)element.className=className;if(text!==undefined)element.textContent=String(text);return element;};
 function setView(next){
   view=next;
@@ -34,6 +35,11 @@ function syncControls(){
   byId('save-settings').disabled=!ready||busy;byId('save-answer').disabled=!ready||busy;byId('resume-upload').disabled=!ready||busy;
   document.querySelectorAll('.answer-action').forEach(button=>{button.disabled=!ready||busy;});
   document.querySelectorAll('#settings-form input:not([type=file]),#settings-form textarea,#settings-form select,#new-question,#new-answer').forEach(input=>{input.disabled=!ready;});
+  const read=byId('read-resume-keywords');
+  read.disabled=!ready||busy||recommendationLoading||!state?.config.resume;
+  read.textContent=recommendationLoading?'Reading résumé…':'Read résumé';read.classList.toggle('is-loading',recommendationLoading);read.setAttribute('aria-busy',String(recommendationLoading));
+  byId('add-resume-keywords').disabled=!ready||busy||recommendationLoading||!byId('recommended-skills').querySelector('input:checked');
+  byId('recommended-skills').querySelectorAll('input').forEach(input=>{input.disabled=!ready||busy||recommendationLoading;});
   byId('dry-run').disabled=!ready||busy||active;
 }
 function fillSettings(){
@@ -52,6 +58,48 @@ function updateKeywordHelp(){
   byId('include-help').textContent=byId('keyword-match').value==='any'?'Any can match · one per line':'All must match · one per line';
 }
 byId('keyword-match').addEventListener('change',updateKeywordHelp);
+function recommendationMessage(message,error=false){
+  const status=byId('recommendation-status');status.textContent=message;status.classList.toggle('error',error);
+}
+function clearRecommendations(resume){
+  recommendationRequest++;recommendationResume=resume?.path||'';recommendationLoading=false;
+  byId('recommended-skills').replaceChildren();
+  recommendationMessage(resume?'Read your saved résumé to find suggested skills.':'Upload a résumé to get keyword recommendations.');
+}
+async function readResumeKeywords(){
+  const resume=state?.config.resume;if(!resume||recommendationLoading)return;
+  const request=++recommendationRequest;recommendationResume=resume.path;recommendationLoading=true;
+  byId('recommended-skills').replaceChildren();recommendationMessage('Reading your saved résumé…');syncControls();
+  try{
+    const result=await api('/api/resume/keywords',{});
+    if(request!==recommendationRequest||state.config.resume?.path!==resume.path)return;
+    if(result.resume?.path!==resume.path)throw new Error('The saved résumé changed. Read it again for current recommendations.');
+    const keywords=Array.isArray(result.keywords)?result.keywords.filter(value=>typeof value==='string'&&value.trim()):[];
+    const fragment=document.createDocumentFragment();
+    for(const keyword of keywords){
+      const label=create('label'),input=create('input');input.type='checkbox';input.value=keyword;
+      input.addEventListener('change',syncControls);label.append(input,document.createTextNode(keyword));fragment.append(label);
+    }
+    byId('recommended-skills').replaceChildren(fragment);
+    recommendationMessage(keywords.length?'Select skills to add to Include keywords.':'No recognizable skills found. Enter your own keywords or try another résumé.');
+  }catch(error){
+    if(request===recommendationRequest)recommendationMessage(`${error.message} You can still edit Include keywords yourself.`,true);
+  }finally{
+    if(request===recommendationRequest){recommendationLoading=false;syncControls();}
+  }
+}
+byId('read-resume-keywords').addEventListener('click',readResumeKeywords);
+byId('add-resume-keywords').addEventListener('click',()=>{
+  const selected=Array.from(byId('recommended-skills').querySelectorAll('input:checked'),input=>input.value);
+  if(!selected.length||busy||recommendationLoading)return;
+  const input=byId('include-keywords'),keywords=[],seen=new Set();
+  for(const value of [...input.value.split('\n'),...selected]){
+    const keyword=value.trim(),key=keyword.toLowerCase();if(!keyword||seen.has(key))continue;
+    seen.add(key);keywords.push(keyword);
+  }
+  input.value=keywords.join('\n');byId('keyword-match').value='any';updateKeywordHelp();
+  toast('Keywords added. Save settings to apply them.');
+});
 const locationKey=value=>String(value||'').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
 function findCountry(value){
   const key=locationKey(value),aliases={usa:'US',unitedstatesofamerica:'US',uk:'GB',greatbritain:'GB'};
@@ -164,6 +212,7 @@ function render(){
   byId('profile-step').classList.toggle('complete',state.readiness.every(message=>message==='Upload a résumé'));
   byId('resume-step').classList.toggle('complete',Boolean(config.resume));
   byId('resume-name').textContent=config.resume?.filename||'No résumé uploaded';byId('resume-detail').textContent=config.resume?`${Math.ceil(config.resume.size/1000)} KB · ready to use`:'PDF, DOC, or DOCX · up to 2 MB';
+  if((config.resume?.path||'')!==recommendationResume)clearRecommendations(config.resume);
   renderHistory();renderQuestions();renderLibrary();syncControls();
 }
 async function refresh(){
@@ -197,6 +246,7 @@ byId('resume-upload').addEventListener('change',event=>{
   perform(async()=>{
     const response=await fetch('/api/resume',{method:'POST',headers:{'X-App-Token':state.token,'X-Filename':encodeURIComponent(file.name),'Content-Type':'application/octet-stream'},body:await file.arrayBuffer()});
     const result=await response.json();if(!response.ok)throw new Error(result.error);event.target.value='';
+    state.config.resume=result.resume;clearRecommendations(result.resume);void readResumeKeywords();
   },'Résumé saved');
 });
 byId('answer-form').addEventListener('submit',event=>{

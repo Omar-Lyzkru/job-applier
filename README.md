@@ -35,6 +35,10 @@ Country and state / region accept typing and show dropdown suggestions. Enter or
 
 **Keyword matching** controls Include keywords: **Match all keywords** requires every listed term; **Match any keyword** accepts at least one. An empty Include keywords field allows any description. Exclude keywords always skip a job if any listed term appears. Older settings retain Match all keywords until you change it. For example, Match any keyword can accept a Python role even when it does not also mention C++.
 
+**Recommended keywords** reads the uploaded résumé on your computer and suggests recognized skills actually mentioned in its text. Suggestions appear after an upload; choose **Read résumé** to read an existing file. Review the checked suggestions, then choose **Add selected keywords**. This keeps your existing keywords, adds your selection, and chooses **Match any keyword** so a job does not need every skill on your résumé. Edit the list as needed and **Save settings**. Reading a résumé never changes saved filters or supplies screening answers. Suggestions use a built-in skill vocabulary and can miss skills; you can always type additional keywords.
+
+PDF, DOC, and DOCX keyword extraction is included in setup. A scanned PDF needs selectable text; password-protected, damaged, or unusually complex documents may need a fresh PDF or DOCX export. Suggestion failures keep the uploaded résumé available for applications. Résumé text is processed locally and is not sent to an AI service or added to GitHub.
+
 ## Results
 
 - **Submitted:** observed LinkedIn confirmation after Submit.
@@ -63,7 +67,7 @@ npm test
 npm run test:browser
 ```
 
-The browser suite runs against local fixtures and a test dashboard. It does not contact LinkedIn or submit real applications. It covers multistep forms, explicit answers, uploads, dry runs, confirmation timeouts, draft cleanup, limits, runner caps, duplicate protection, stop races, local API guards, and dashboard controls.
+The browser suite runs against local fixtures and a test dashboard. It does not contact LinkedIn or submit real applications. It covers multistep forms, explicit answers, uploads, résumé keyword selection, dry runs, confirmation timeouts, draft cleanup, limits, runner caps, duplicate protection, stop races, local API guards, and dashboard controls. The local API tests read synthetic PDF, DOC, and DOCX résumés and verify that recommendations leave saved settings unchanged.
 
 Live job submission requires your account sign-in and profile setup. LinkedIn's DOM and employer forms are variable; fixture verification does not establish support for every live form. Success is recorded only when confirmation is observed.
 

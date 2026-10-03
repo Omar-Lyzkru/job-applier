@@ -114,3 +114,56 @@ test('resume uploads preserve legacy profile links without requiring a settings 
   assert.equal(current.config.profile.firstName,'Test');
   assert.equal(current.config.resume.filename,'fixture.pdf');
 });
+
+test('résumé keyword recommendations read uploaded PDF and Word files without changing saved filters',async t=>{
+  const {upload,send,store}=await setup(t);
+  await send('/api/config',{profile:{firstName:'Unchanged'},search:{titles:['Intern'],includeKeywords:['manual keyword'],excludeKeywords:['Unpaid'],keywordMatch:'all'}});
+  for(const filename of ['skills.pdf','skills.docx','skills.doc']){
+    const bytes=await readFile(new URL(`./fixtures/resumes/${filename}`,import.meta.url));
+    const uploaded=await (await upload(filename,bytes)).json();
+    const previous=await store.getConfig();
+    const response=await send('/api/resume/keywords',{path:'/etc/passwd'});
+    assert.equal(response.status,200);
+    const result=await response.json();
+    assert.equal(result.resume.path,uploaded.resume.path);
+    assert.equal(result.resume.filename,filename);
+    assert.deepEqual(result.keywords,['C++','Excel','JavaScript','Node.js','Project management','Python','SQL']);
+    assert.equal(Object.hasOwn(result,'text'),false);
+    assert.deepEqual(await store.getConfig(),previous);
+  }
+});
+
+test('résumé analysis explains missing, unreadable, and text-free documents without removing the upload',async t=>{
+  const {upload,send,store}=await setup(t);
+  const absent=await send('/api/resume/keywords');
+  assert.equal(absent.status,400);
+  assert.match((await absent.json()).error,/upload.*résumé/i);
+  for(const filename of ['bad.pdf','bad.docx','bad.doc']){
+    await upload(filename,'not-a-real-document');
+    const invalid=await send('/api/resume/keywords');
+    assert.equal(invalid.status,400);
+    assert.match((await invalid.json()).error,/read|PDF|document/i);
+    assert.equal((await store.getConfig()).resume.filename,filename);
+  }
+  await upload('blank.pdf',await readFile(new URL('./fixtures/resumes/blank.pdf',import.meta.url)));
+  const blank=await send('/api/resume/keywords');
+  assert.equal(blank.status,400);
+  assert.match((await blank.json()).error,/selectable text|scanned|readable text/i);
+  assert.equal((await store.getConfig()).resume.filename,'blank.pdf');
+});
+
+test('résumé keyword analysis requires the local app token and rejects cross-origin requests',async t=>{
+  const {send}=await setup(t);
+  assert.equal((await send('/api/resume/keywords',{}, {'X-App-Token':''})).status,403);
+  assert.equal((await send('/api/resume/keywords',{}, {Origin:'https://evil.example'})).status,403);
+});
+
+test('résumé analysis rejects a small compressed Word file that expands beyond its reading limit',async t=>{
+  const {upload,send,store}=await setup(t);
+  const uploaded=await upload('expanded.docx',await readFile(new URL('./fixtures/resumes/expanded.docx',import.meta.url)));
+  assert.equal(uploaded.status,200);
+  const response=await send('/api/resume/keywords');
+  assert.equal(response.status,400);
+  assert.match((await response.json()).error,/large file|simpler/i);
+  assert.equal((await store.getConfig()).resume.filename,'expanded.docx');
+});

@@ -227,3 +227,115 @@ test('browser: experience filters and keyword matching persist across reload and
   assert.equal(await levels.getByRole('checkbox',{checked:true}).count(),0);
   assert.equal(await keywordMatch.inputValue(),'all');
 });
+
+test('browser: résumé keyword recommendations are opt-in and preserve unsaved profile and search edits',async t=>{
+  const {store,page}=await settingsPage(t,{firstName:'Saved'}, {titles:['Saved role'],includeKeywords:['Remote'],excludeKeywords:['Unpaid'],experienceLevels:['ENTRY_LEVEL']});
+  const read=page.getByRole('button',{name:'Read résumé',exact:true});
+  assert.equal(await read.count(),1);
+  assert.equal(await read.isDisabled(),true);
+  assert.equal(await page.getByRole('button',{name:'Add selected keywords',exact:true}).isDisabled(),true);
+  let requests=0;
+  await page.route('**/api/resume/keywords',async route=>{
+    requests++;assert.equal(route.request().method(),'POST');assert.deepEqual(route.request().postDataJSON(),{});
+    assert.ok(route.request().headers()['x-app-token']);
+    await route.fulfill({json:{resume:(await store.getConfig()).resume,keywords:['Python','SQL','JavaScript']}});
+  });
+  await page.getByLabel('First name',{exact:true}).fill('Unsaved');
+  await page.getByLabel('Job titles',{exact:true}).fill('Backend Engineer');
+  await page.getByLabel('Include keywords',{exact:true}).fill('python\nKubernetes');
+  await page.getByLabel('Exclude keywords',{exact:true}).fill('Contract');
+  await page.getByLabel('Upload résumé',{exact:true}).setInputFiles({name:'skills.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-test fixture')});
+  const skills=page.getByRole('group',{name:'Recommended skills',exact:true});
+  await skills.getByRole('checkbox',{name:'SQL',exact:true}).waitFor();
+  assert.equal(requests,1);
+  assert.equal(await page.getByLabel('Include keywords',{exact:true}).inputValue(),'python\nKubernetes');
+  assert.equal(await page.getByLabel('First name',{exact:true}).inputValue(),'Unsaved');
+  assert.equal((await store.getConfig()).search.keywordMatch,'all');
+  await skills.getByRole('checkbox',{name:'Python',exact:true}).check();
+  await skills.getByRole('checkbox',{name:'SQL',exact:true}).check();
+  await page.getByRole('button',{name:'Add selected keywords',exact:true}).click();
+  assert.equal(await page.getByLabel('Include keywords',{exact:true}).inputValue(),'python\nKubernetes\nSQL');
+  assert.equal(await page.getByRole('combobox',{name:'Keyword matching',exact:true}).inputValue(),'any');
+  assert.match(await page.locator('#toast').textContent(),/Save settings/);
+  assert.deepEqual((await store.getConfig()).search.includeKeywords,['Remote']);
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Settings saved'&&!document.querySelector('#save-settings').disabled);
+  const config=await store.getConfig();
+  assert.equal(config.profile.firstName,'Unsaved');
+  assert.deepEqual(config.search.titles,['Backend Engineer']);
+  assert.deepEqual(config.search.includeKeywords,['python','Kubernetes','SQL']);
+  assert.deepEqual(config.search.excludeKeywords,['Contract']);
+  assert.deepEqual(config.search.experienceLevels,['ENTRY_LEVEL']);
+  assert.equal(config.search.keywordMatch,'any');
+  await page.reload();await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#save-settings').disabled);
+  assert.equal(await read.isDisabled(),false);
+  await read.click();await skills.getByRole('checkbox',{name:'SQL',exact:true}).waitFor();
+  assert.equal(requests,2);
+});
+
+test('browser: résumé keyword extraction failure is inline and the uploaded résumé stays saved',async t=>{
+  const {store,page}=await settingsPage(t);
+  assert.equal(await page.getByRole('button',{name:'Read résumé',exact:true}).count(),1);
+  await page.route('**/api/resume/keywords',route=>route.fulfill({status:400,json:{error:'No readable text. Upload a text-based résumé.'}}));
+  await page.getByLabel('Include keywords',{exact:true}).fill('Manual skill');
+  await page.getByLabel('Upload résumé',{exact:true}).setInputFiles({name:'scan.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-test fixture')});
+  await page.locator('#recommendation-status').filter({hasText:'No readable text'}).waitFor();
+  await page.getByText('Résumé saved',{exact:true}).waitFor();
+  assert.equal((await store.getConfig()).resume.filename,'scan.pdf');
+  assert.equal(await page.locator('#resume-name').textContent(),'scan.pdf');
+  assert.equal(await page.getByLabel('Include keywords',{exact:true}).inputValue(),'Manual skill');
+  assert.equal(await page.locator('#toast').textContent(),'Résumé saved');
+  assert.equal(await page.locator('#toast').evaluate(element=>element.classList.contains('error')),false);
+  assert.equal(await page.getByRole('button',{name:'Read résumé',exact:true}).isDisabled(),false);
+  assert.equal(await page.getByRole('button',{name:'Add selected keywords',exact:true}).isDisabled(),true);
+});
+
+test('browser: résumé keyword responses from an older upload cannot replace current suggestions',async t=>{
+  const {store,page}=await settingsPage(t);
+  assert.equal(await page.getByRole('button',{name:'Read résumé',exact:true}).count(),1);
+  let requests=0,releaseOlder;
+  const olderPending=new Promise(resolve=>{releaseOlder=resolve;});
+  await page.route('**/api/resume/keywords',async route=>{
+    const request=++requests,resume=(await store.getConfig()).resume;
+    if(request===2)await olderPending;
+    await route.fulfill({json:{resume,keywords:request===1?['Python']:request===2?['JavaScript']:['SQL']}});
+  });
+  const upload=name=>page.getByLabel('Upload résumé',{exact:true}).setInputFiles({name,mimeType:'application/pdf',buffer:Buffer.from('%PDF-test fixture')});
+  const skills=page.getByRole('group',{name:'Recommended skills',exact:true});
+  await upload('first.pdf');await skills.getByRole('checkbox',{name:'Python',exact:true}).waitFor();
+  await upload('second.pdf');
+  await page.waitForFunction(()=>document.querySelector('#recommendation-status').textContent.includes('Reading'));
+  assert.equal(await skills.getByRole('checkbox',{name:'Python',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Read résumé',exact:true}).isDisabled(),true);
+  await page.waitForFunction(()=>!document.querySelector('#resume-upload').disabled);
+  await upload('third.pdf');await skills.getByRole('checkbox',{name:'SQL',exact:true}).waitFor();
+  const olderResponse=page.waitForResponse(response=>response.url().endsWith('/api/resume/keywords'));
+  releaseOlder();await (await olderResponse).finished();
+  assert.equal((await store.getConfig()).resume.filename,'third.pdf');
+  assert.equal(await skills.getByRole('checkbox',{name:'SQL',exact:true}).count(),1);
+  assert.equal(await skills.getByRole('checkbox',{name:'JavaScript',exact:true}).count(),0);
+});
+
+test('browser: real résumé extraction populates selectable keywords on desktop and mobile',async t=>{
+  const {store,page}=await settingsPage(t);
+  await page.getByLabel('Upload résumé',{exact:true}).setInputFiles(resolve('test/fixtures/resumes/skills.pdf'));
+  const skills=page.getByRole('group',{name:'Recommended skills',exact:true});
+  await skills.getByRole('checkbox',{name:'Python',exact:true}).waitFor();
+  assert.equal(await skills.getByRole('checkbox').count(),7);
+  assert.deepEqual((await store.getConfig()).search.includeKeywords,[]);
+  await skills.getByRole('checkbox',{name:'Python',exact:true}).check();
+  await skills.getByRole('checkbox',{name:'SQL',exact:true}).check();
+  await page.getByRole('button',{name:'Add selected keywords',exact:true}).click();
+  assert.equal(await page.getByLabel('Include keywords',{exact:true}).inputValue(),'Python\nSQL');
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Settings saved'&&!document.querySelector('#save-settings').disabled);
+  const search=(await store.getConfig()).search;
+  assert.deepEqual(search.includeKeywords,['Python','SQL']);
+  assert.equal(search.keywordMatch,'any');
+  await mkdir(resolve('test-artifacts'),{recursive:true});
+  await page.screenshot({path:resolve('test-artifacts/resume-keywords-desktop.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.screenshot({path:resolve('test-artifacts/resume-keywords-mobile.png'),fullPage:true});
+});

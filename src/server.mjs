@@ -7,6 +7,7 @@ import {createStore} from './store.mjs';
 import {createRunner} from './runner.mjs';
 import {createLinkedInAdapter} from './browser/linkedin.mjs';
 import {MAX_RESUME_BYTES,readiness,dayKey,countsTowardCap,resolveAnswer} from './domain.mjs';
+import {analyzeResume} from './resume-analysis.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 function failure(message,status=400){return Object.assign(new Error(message),{status});}
@@ -34,7 +35,7 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
   store ||= await createStore(dataDir);
   try{await store.recoverPending();}catch(error){await store.close();throw error;}
   runner ||= createRunner({store,adapter:createLinkedInAdapter({dataDir})});
-  const token=randomBytes(32).toString('hex');let actualPort=port;
+  const token=randomBytes(32).toString('hex');let actualPort=port,recommendations=null;
   async function status(){
     const config=await store.getConfig(),history=await store.getHistory();
     const today=history.filter(record=>countsTowardCap(record,dayKey(new Date(),config.timezone),config.timezone));
@@ -80,6 +81,18 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
         try{await file.writeFile(body);await file.sync();}finally{await file.close();}
         const resume={path,filename:name,size:body.length};
         await store.saveResume(resume);send({resume});return;
+      }
+      if(req.method==='POST' && path==='/api/resume/keywords'){
+        await readJson(req);
+        const {resume}=await store.getConfig();
+        if(!resume)throw failure('Upload a résumé first to get recommended keywords.');
+        if(recommendations?.path!==resume.path){
+          if(recommendations?.pending)throw failure('The previous résumé is still being read. Try again in a few seconds.',429);
+          const current={path:resume.path,pending:true};recommendations=current;
+          current.promise=analyzeResume(resume).then(keywords=>({resume,keywords})).finally(()=>{current.pending=false;});
+          current.promise.catch(()=>{if(recommendations===current)recommendations=null;});
+        }
+        send(await recommendations.promise);return;
       }
       if(req.method==='POST' && path==='/api/config'){
         const input=await readJson(req);if(!input||typeof input!=='object'||Array.isArray(input))throw failure('Settings must be an object');
