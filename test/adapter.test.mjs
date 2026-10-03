@@ -138,6 +138,14 @@ test('browser: experience filter values come from LinkedIn controls rather than 
   assert.equal(fixture.state.searches.at(-1).f_E,'11,22');
 });
 
+test('browser: LinkedIn visible and accessibility filter labels allow automatic experience selection',async t=>{
+  const {adapter,fixture}=await setup(t,'experience-linkedin-labels');
+  const jobs=[];
+  for await(const job of adapter.findJobs({titles:['Software Engineer'],location:'Chicago',workplace:'any',experienceLevels:['INTERNSHIP','ENTRY_LEVEL']},{scanLimit:3}))jobs.push(job);
+  assert.deepEqual(jobs.map(job=>job.id),['1001','1002','1003']);
+  assert.equal(fixture.state.searches.slice(1).every(search=>search.f_E==='1,2'),true);
+});
+
 test('browser: missing experience filter controls block discovery instead of ignoring a selected level',async t=>{
   const {adapter,fixture}=await setup(t,'experience-unavailable');
   await assert.rejects(async()=>{

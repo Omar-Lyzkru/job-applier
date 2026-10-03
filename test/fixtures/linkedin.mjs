@@ -23,6 +23,7 @@ export async function startFixture(scenario='success') {
       if(scenario==='experience-widened' && url.searchParams.has('f_E'))selected.add('4');
       const experienceOptions=`<fieldset><legend>Experience level</legend>${levels.map((label,index)=>{
         const value=String((index+1)*(scenario==='experience-values'?11:1));
+        if(scenario==='experience-linkedin-labels')return `<input id="experience-${value}" type="checkbox" name="experience-level-filter-value" value="${value}"${selected.has(value)?' checked':''}><label for="experience-${value}"><span>${label}</span><span class="visually-hidden"> Filter by ${label}</span></label>`;
         return `<label><input type="checkbox" name="f_E" value="${value}"${selected.has(value)?' checked':''}>${label}${scenario==='experience-popup'?' (123)':''}</label>`;
       }).join('')}</fieldset>`;
       const experience=scenario==='experience-unavailable'?'':scenario==='experience-popup'?`<button id="experience">Experience level</button><div id="experience-options"></div><script>document.querySelector('#experience').onclick=()=>setTimeout(()=>{document.querySelector('#experience-options').innerHTML=${JSON.stringify(experienceOptions)};},150);</script>`:scenario==='experience-delayed'?`<div id="experience-options"></div><script>setTimeout(()=>{document.querySelector('#experience-options').innerHTML=${JSON.stringify(experienceOptions)};},250);</script>`:experienceOptions;

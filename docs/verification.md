@@ -3,14 +3,14 @@
 Verified on this Linux desktop with Node 24.21.0 and Playwright 1.62.1.
 
 - `npm test`: 37/37 unit, runner, storage, and localhost API tests pass.
-- `npm run test:browser`: 34/34 local Chromium fixture/dashboard scenarios pass.
+- `npm run test:browser`: 35/35 local Chromium fixture/dashboard scenarios pass.
 - Visible Chromium launch and fixture sign-in detection pass.
 - Shell/JavaScript syntax and Git whitespace checks pass.
 - Desktop and mobile screenshots inspected by the author; no mobile document overflow.
 
 The initial whole-change reviewer found six material issues. One regression-driven fix pass addressed exclusive data ownership, accepted/selected résumé uploads, custom ARIA control discovery, semantic choice matching, persistent operational blockers, and CV screening questions. Each regression failed before its fix. The reviewer reported no minor findings.
 
-Tests never contact LinkedIn or submit real applications. Live LinkedIn compatibility remains unverified until the user's profile and account are configured. Unsupported employer controls require manual completion. This build uses Linux abstract sockets for exclusive data-folder ownership within one network namespace; no stale lock-file cleanup is needed.
+Automated tests never contact LinkedIn or submit real applications. A separate live search-only check verified Internship filter selection; live application submission compatibility remains unverified. Unsupported employer controls require manual completion. This build uses Linux abstract sockets for exclusive data-folder ownership within one network namespace; no stale lock-file cleanup is needed.
 
 ## Settings update — 2026-10-02
 
@@ -90,6 +90,29 @@ Desktop and 390px mobile Settings screenshots were inspected without overflow.
 Live authenticated LinkedIn compatibility remains unverified; browser tests use
 local fixtures. This implements the requested experience-selection option.
 Restart the server and refresh the dashboard before saving the new settings.
+
+## LinkedIn experience label fix — 2026-10-02
+
+A search-only inspection of the signed-in Job Applier browser reproduced the
+reported filter-discovery failure. LinkedIn's native controls have associated
+labels containing both visible text and screen-reader text, for example
+`Internship Filter by Internship`. The exact label comparison rejected this
+duplicated text before applying the filter. The same layout exposed numeric
+values 1–6 for the six supported experience categories.
+
+Normalization now collapses the two label parts only when both normalize to the
+same name. Mismatched labels retain their original rejection behavior. A fixture
+using the observed separate input/associated-label markup reproduced the exact
+failure before the fix, then passed for multiple selections and pagination.
+Fresh full suites pass: 37 unit/API tests and 35 local browser scenarios. An
+independent reviewer found no material issues.
+
+The corrected adapter was then checked against the signed-in live search with
+the user's existing Internship preference. It automatically applied `f_E=1`,
+confirmed that Internship alone was checked, and returned a result. This was a
+search-only check: no application run was started and no application was
+submitted. Live employer-form submission compatibility remains unverified.
+Restart the app and refresh its dashboard to load the fix.
 
 ## Execution record
 

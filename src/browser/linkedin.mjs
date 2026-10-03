@@ -27,7 +27,11 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
   }
   async function experienceFilterValues(page,levels,signal,{confirm=false}={}){
     const unavailable=()=>new Error(confirm?'LinkedIn did not confirm the selected experience levels. Check its filters, or clear Experience level in Settings before retrying.':'LinkedIn\'s experience-level filter is unavailable or changed. Open LinkedIn to check it, or clear Experience level in Settings before retrying.');
-    const normalize=label=>label.replace(/[\u2010-\u2015]/g,'-').replace(/\([\d,.\s]+\)\s*$/,'').replace(/\s+/g,' ').trim().toLowerCase();
+    const normalizePart=label=>label.replace(/[\u2010-\u2015]/g,'-').replace(/\([\d,.\s]+\)\s*$/,'').replace(/\s+/g,' ').trim().toLowerCase();
+    const normalize=label=>{
+      const parts=label.split(/\s+filter by\s+/i).map(normalizePart);
+      return parts.length===2 && parts[0]===parts[1]?parts[0]:normalizePart(label);
+    };
     const read=async()=>{
       const controls=await page.locator('input[type="checkbox"]').evaluateAll(inputs=>inputs.map(input=>({
         value:input.value,checked:input.checked,
