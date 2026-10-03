@@ -11,6 +11,8 @@ export async function startFixture(scenario='success') {
       res.writeHead(200,{'Content-Type':'application/json'}); res.end('{}'); return;
     }
     res.setHeader('Content-Type','text/html');
+    if(url.pathname==='/feed/' && state.beforeFeed)await state.beforeFeed(req,res);
+    if(res.destroyed)return;
     if (scenario==='signed-out') {res.end('<h1>Sign in</h1><label>Email<input id="username"></label><button>Sign in</button>'); return;}
     if (url.pathname.startsWith('/jobs/search')) {
       state.searches.push(Object.fromEntries(url.searchParams));

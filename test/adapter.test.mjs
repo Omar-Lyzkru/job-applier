@@ -123,3 +123,95 @@ test('browser: sign-in state is detected and browser ownership is reused',async 
   await signedOut.adapter.openBrowser();
   assert.equal(await signedOut.adapter.isSignedIn(),false);
 });
+
+test('browser: closing the tracked tab reopens a page in the same browser session',async t=>{
+  const {adapter,fixture}=await setup(t);
+  const first=await adapter.openBrowser(),context=first.context();
+  const other=await context.newPage();
+  await other.goto(fixture.url+'/login');
+  await context.addCookies([{name:'fixture_session',value:'keep-me',url:fixture.url}]);
+  await first.close();
+  let reopened;
+  try {
+    const pages=await Promise.all([adapter.openBrowser(),adapter.openBrowser(),adapter.openBrowser()]);
+    reopened=pages[0];
+    assert.equal(pages.every(candidate=>candidate===reopened),true);
+    assert.equal(reopened.context()===context,true,'Reopening must reuse the context that already owns the profile');
+    assert.equal(reopened===other,false);
+    assert.equal(reopened.isClosed(),false);
+    assert.equal(other.isClosed(),false);
+    assert.equal(other.url(),fixture.url+'/login');
+    assert.equal(new URL(reopened.url()).pathname,'/feed/');
+    assert.equal((await context.cookies(fixture.url)).find(cookie=>cookie.name==='fixture_session').value,'keep-me');
+  } finally {
+    if(reopened && reopened.context()!==context)await reopened.context().close();
+    await context.close();
+  }
+});
+
+test('browser: overlapping closes finish before reopening and retain the saved session',async t=>{
+  const {adapter,fixture}=await setup(t);
+  const first=await adapter.openBrowser(),context=first.context();
+  await context.addCookies([{name:'fixture_session',value:'keep-me',url:fixture.url,expires:Math.floor(Date.now()/1000)+3600}]);
+  const gate=Promise.withResolvers(),entered=Promise.withResolvers();
+  const closeContext=context.close.bind(context);
+  context.close=async()=>{entered.resolve();await gate.promise;await closeContext();};
+  let closing,reopening,reopened;
+  try {
+    closing=adapter.close();
+    await entered.promise;
+    let secondCloseFinished=false;
+    const secondClose=adapter.close().then(()=>{secondCloseFinished=true;});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(secondCloseFinished,false,'Every close must wait for the owned browser to finish closing');
+    reopening=adapter.openBrowser();
+    gate.resolve();
+    reopened=await reopening;
+    await Promise.all([closing,secondClose]);
+    assert.equal(reopened.context()===context,false);
+    assert.equal(reopened.isClosed(),false);
+    assert.equal((await reopened.context().cookies(fixture.url)).find(cookie=>cookie.name==='fixture_session')?.value,'keep-me');
+    assert.equal((await adapter.openBrowser())===reopened,true);
+    await reopened.context().close();
+    reopened=await adapter.openBrowser();
+    assert.equal(reopened.isClosed(),false);
+    assert.equal(new URL(reopened.url()).pathname,'/feed/');
+  } finally {
+    gate.resolve();
+    if(closing)await closing;
+    if(reopening)await reopening.catch(()=>{});
+    await adapter.close();
+  }
+});
+
+test('browser: concurrent opens await the initial feed navigation',async t=>{
+  const {adapter,fixture}=await setup(t);
+  const gate=Promise.withResolvers(),entered=Promise.withResolvers();
+  fixture.state.beforeFeed=async()=>{entered.resolve();await gate.promise;};
+  let first,second;
+  try {
+    first=adapter.openBrowser();
+    await entered.promise;
+    let secondFinished=false;
+    second=adapter.openBrowser().then(page=>{secondFinished=true;return page;});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(secondFinished,false,'Open must not return a page whose initial navigation is still pending');
+    gate.resolve();
+    const pages=await Promise.all([first,second]);
+    assert.equal(pages[0]===pages[1],true);
+    assert.equal(new URL(pages[0].url()).pathname,'/feed/');
+  } finally {
+    gate.resolve();
+    await Promise.allSettled([first,second].filter(Boolean));
+  }
+});
+
+test('browser: failed feed navigation is retried by the next open',async t=>{
+  const {adapter,fixture}=await setup(t);
+  fixture.state.beforeFeed=(_request,response)=>response.destroy();
+  await assert.rejects(adapter.openBrowser(),/net::ERR_EMPTY_RESPONSE/);
+  fixture.state.beforeFeed=null;
+  const page=await adapter.openBrowser();
+  assert.equal(new URL(page.url()).pathname,'/feed/');
+  assert.equal(await page.getByRole('heading',{name:'Feed'}).isVisible(),true);
+});

@@ -2,8 +2,8 @@
 
 Verified on this Linux desktop with Node 24.21.0 and Playwright 1.62.1.
 
-- `npm test`: 33/33 unit, runner, storage, and localhost API tests pass.
-- `npm run test:browser`: 22/22 local Chromium fixture/dashboard scenarios pass.
+- `npm test`: 35/35 unit, runner, storage, and localhost API tests pass.
+- `npm run test:browser`: 26/26 local Chromium fixture/dashboard scenarios pass.
 - Visible Chromium launch and fixture sign-in detection pass.
 - Shell/JavaScript syntax and Git whitespace checks pass.
 - Desktop and mobile screenshots inspected by the author; no mobile document overflow.
@@ -41,6 +41,25 @@ typing regressions failed against the old selects before implementation. Fresh
 suites pass with 33 unit/API tests and 22 browser scenarios. Desktop and mobile
 Settings screenshots were inspected. This follow-up changes browser assets only;
 the running app serves them after the page is refreshed.
+
+## Browser session update — 2026-10-02
+
+Closing the tracked LinkedIn tab now opens a replacement feed tab in the same
+live Chromium context, preserving other tabs and cookies. Opens wait for pending
+navigation and browser closure; simultaneous closes share completion. Failed feed
+navigation is retried by a later open. Context close callbacks clear only their
+own session references.
+
+All four lifecycle regressions failed before their fixes and now pass. Fresh full
+suites pass with 35 unit/API tests and 26 local browser scenarios. A separate
+reviewer reported no material findings. A real full-Chromium check with a temporary
+profile reproduced external ownership rejection, verified the concise close-and-
+retry message, preserved the owner's tab and cookie, and reopened successfully
+after the owner closed. No personal browser profile or live LinkedIn was used.
+
+This changes the server's browser code. Restart the app in its terminal and
+refresh the dashboard to load it. Saved profile data and cookies are retained;
+the fix does not delete browser locks or stop other browser processes.
 
 ## Execution record
 

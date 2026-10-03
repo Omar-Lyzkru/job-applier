@@ -66,6 +66,7 @@ Live job submission requires your account sign-in and profile setup. LinkedIn's 
 ## Troubleshooting
 
 - **Chromium missing:** run `npm run browser:install`.
+- **Browser profile already open:** close the older Job Applier Chromium window, then choose **Open LinkedIn** again. The app reuses its live browser when its LinkedIn tab closes and waits for closure before reopening. Keep the saved browser profile so your sign-in remains available.
 - **Missing Linux browser libraries:** use Playwright's documented `npx playwright install-deps chromium` on your machine, then retry. This may need administrator permission.
 - **Sign-in expired / verification:** Open LinkedIn, complete it in the browser, then start a new run.
 - **Unsupported field / résumé verification failure:** inspect that application in LinkedIn. The app records the reason instead of guessing or claiming success.
