@@ -71,3 +71,24 @@ test('profile links reject malformed URLs and non-web protocols with the field n
     assert.throws(()=>validateConfig({profile:{website:value}}),/Website \/ portfolio/);
   }
 });
+
+test('experience-level selections and keyword mode validate while old settings keep their behavior',()=>{
+  const levels=['INTERNSHIP','ENTRY_LEVEL','ASSOCIATE','MID_SENIOR_LEVEL','DIRECTOR','EXECUTIVE'];
+  const config=validateConfig({search:{experienceLevels:[...levels,'INTERNSHIP'],keywordMatch:'any'}});
+  assert.deepEqual(config.search.experienceLevels,levels);
+  assert.equal(config.search.keywordMatch,'any');
+  const legacy=validateConfig({search:{includeKeywords:['Python','C++']}});
+  assert.deepEqual(legacy.search.experienceLevels,[]);
+  assert.equal(legacy.search.keywordMatch,'all');
+  for(const experienceLevels of ['INTERNSHIP',['JUNIOR'],['1']])assert.throws(()=>validateConfig({search:{experienceLevels}}),/experience/i);
+  assert.throws(()=>validateConfig({search:{keywordMatch:'guess'}}),/keyword/i);
+});
+
+test('any-keyword matching accepts an alternative skill and still applies exclusions',()=>{
+  const search={includeKeywords:['C++','Python','software'],excludeKeywords:['unpaid'],keywordMatch:'any'};
+  assert.equal(matchesJob('Python developer internship',search),true);
+  assert.equal(matchesJob('Python developer internship',{...search,keywordMatch:'all'}),false);
+  assert.equal(matchesJob('Python developer internship, unpaid',search),false);
+  assert.equal(matchesJob('Marketing internship',search),false);
+  assert.equal(matchesJob('Marketing internship',{...search,includeKeywords:[]}),true);
+});

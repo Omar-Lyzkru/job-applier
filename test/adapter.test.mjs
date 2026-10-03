@@ -112,6 +112,75 @@ test('browser: search pagination preserves canonical IDs and filters within scan
   assert.equal(fixture.state.searches[0].location,'Chicago');
   assert.equal(fixture.state.searches[0].f_WT,'2');
   assert.equal(fixture.state.searches[0].f_AL,'true');
+  assert.equal(fixture.state.searches[0].f_E,undefined);
+});
+
+test('browser: selected experience levels reach every LinkedIn search',async t=>{
+  const {adapter,fixture}=await setup(t);
+  for(const [levels,expected] of [
+    [['INTERNSHIP'],'1'],[['ENTRY_LEVEL'],'2'],[['ASSOCIATE'],'3'],
+    [['MID_SENIOR_LEVEL'],'4'],[['DIRECTOR'],'5'],[['EXECUTIVE'],'6'],
+    [['INTERNSHIP','ENTRY_LEVEL'],'1,2']
+  ]){
+    const jobs=[];
+    for await(const candidate of adapter.findJobs({titles:['Software Engineer'],location:'Chicago',workplace:'any',experienceLevels:levels},{scanLimit:1}))jobs.push(candidate);
+    assert.equal(jobs.length,1);
+    assert.equal(fixture.state.searches.at(-1).f_E,expected);
+  }
+});
+
+test('browser: experience filter values come from LinkedIn controls rather than assumed numbers',async t=>{
+  const {adapter,fixture}=await setup(t,'experience-values');
+  const jobs=[];
+  for await(const job of adapter.findJobs({titles:['Software Engineer'],location:'Chicago',workplace:'any',experienceLevels:['INTERNSHIP','ENTRY_LEVEL']},{scanLimit:1}))jobs.push(job);
+  assert.equal(jobs.length,1);
+  assert.equal(fixture.state.searches[0].f_E,undefined);
+  assert.equal(fixture.state.searches.at(-1).f_E,'11,22');
+});
+
+test('browser: missing experience filter controls block discovery instead of ignoring a selected level',async t=>{
+  const {adapter,fixture}=await setup(t,'experience-unavailable');
+  await assert.rejects(async()=>{
+    for await(const job of adapter.findJobs({titles:['Software Engineer'],location:'Chicago',workplace:'any',experienceLevels:['INTERNSHIP']},{scanLimit:1}))assert.fail('Must not yield unfiltered jobs');
+  },/LinkedIn.*experience.*filter/i);
+  assert.equal(fixture.state.searches.length,1);
+});
+
+test('browser: experience popup loading and result counts preserve selected levels across pagination',async t=>{
+  const {adapter,fixture}=await setup(t,'experience-popup');
+  const jobs=[];
+  for await(const job of adapter.findJobs({titles:['Software Engineer'],location:'Chicago',workplace:'any',experienceLevels:['INTERNSHIP','ENTRY_LEVEL']},{scanLimit:3}))jobs.push(job);
+  assert.equal(jobs.length,3);
+  assert.equal(fixture.state.searches[0].f_E,undefined);
+  assert.equal(fixture.state.searches.length,3);
+  assert.equal(fixture.state.searches.slice(1).every(search=>search.f_E==='1,2'),true);
+  assert.equal(fixture.state.searches.at(-1).start,'25');
+});
+
+test('browser: delayed experience controls load before discovery continues',async t=>{
+  const {adapter,fixture}=await setup(t,'experience-delayed');
+  const jobs=[];
+  for await(const job of adapter.findJobs({titles:['Software Engineer'],location:'Chicago',workplace:'any',experienceLevels:['INTERNSHIP']},{scanLimit:1}))jobs.push(job);
+  assert.equal(jobs.length,1);
+  assert.equal(fixture.state.searches.at(-1).f_E,'1');
+});
+
+test('browser: ignored experience selections yield no jobs for application',async t=>{
+  for(const scenario of ['experience-ignored','experience-widened']){
+    const {adapter}=await setup(t,scenario);
+    await assert.rejects(async()=>{
+      for await(const job of adapter.findJobs({titles:['Software Engineer'],location:'Chicago',workplace:'any',experienceLevels:['INTERNSHIP']},{scanLimit:1}))assert.fail('Must not yield jobs when LinkedIn ignores or widens the selected level');
+    },/LinkedIn.*confirm.*experience/i);
+  }
+});
+
+test('browser: experience filtering is confirmed again before accepting a later results page',async t=>{
+  const {adapter}=await setup(t,'experience-ignored-later');
+  const jobs=[];
+  await assert.rejects(async()=>{
+    for await(const job of adapter.findJobs({titles:['Software Engineer'],location:'Chicago',workplace:'any',experienceLevels:['INTERNSHIP']},{scanLimit:3}))jobs.push(job);
+  },/LinkedIn.*confirm.*experience/i);
+  assert.deepEqual(jobs.map(job=>job.id),['1001','1002']);
 });
 test('browser: sign-in state is detected and browser ownership is reused',async t=>{
   const {adapter}=await setup(t);

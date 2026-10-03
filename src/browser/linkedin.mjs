@@ -2,6 +2,7 @@ import {createBrowserSession} from './session.mjs';
 import {fillApplicationFields,validationErrors,checkStopped} from './forms.mjs';
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const experienceLabels={INTERNSHIP:'Internship',ENTRY_LEVEL:'Entry level',ASSOCIATE:'Associate',MID_SENIOR_LEVEL:'Mid-Senior level',DIRECTOR:'Director',EXECUTIVE:'Executive'};
 export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=null,timeouts={}}) {
   const baseUrl=fixtureBaseUrl||'https://www.linkedin.com';
   const action=timeouts.action||10000,confirmation=timeouts.confirmation||15000,cleanup=timeouts.cleanup||4000;
@@ -23,6 +24,40 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
     const page=await session.open();
     await page.goto(`${baseUrl}/jobs/view/${job.id}/`,{waitUntil:'domcontentloaded'});
     return page;
+  }
+  async function experienceFilterValues(page,levels,signal,{confirm=false}={}){
+    const unavailable=()=>new Error(confirm?'LinkedIn did not confirm the selected experience levels. Check its filters, or clear Experience level in Settings before retrying.':'LinkedIn\'s experience-level filter is unavailable or changed. Open LinkedIn to check it, or clear Experience level in Settings before retrying.');
+    const normalize=label=>label.replace(/[\u2010-\u2015]/g,'-').replace(/\([\d,.\s]+\)\s*$/,'').replace(/\s+/g,' ').trim().toLowerCase();
+    const read=async()=>{
+      const controls=await page.locator('input[type="checkbox"]').evaluateAll(inputs=>inputs.map(input=>({
+        value:input.value,checked:input.checked,
+        label:Array.from(input.labels||[]).map(label=>label.textContent).join(' ') || input.getAttribute('aria-label') || (input.getAttribute('aria-labelledby')||'').split(/\s+/).map(id=>document.getElementById(id)?.textContent||'').join(' ')
+      })));
+      const values=[];
+      for(const level of levels){
+        if(!experienceLabels[level])throw unavailable();
+        const matches=new Set(controls.filter(control=>normalize(control.label)===normalize(experienceLabels[level]) && /^\d+$/.test(control.value)).map(control=>control.value));
+        if(matches.size!==1)return null;
+        values.push([...matches][0]);
+      }
+      if(confirm){
+        const checked=new Set(Object.entries(experienceLabels).filter(([,label])=>controls.some(control=>control.checked && normalize(control.label)===normalize(label))).map(([level])=>level));
+        if(checked.size!==levels.length || levels.some(level=>!checked.has(level)))return null;
+      }
+      return values.join(',');
+    };
+    const end=Date.now()+action;let opened=false;
+    while(Date.now()<end){
+      checkStopped(signal);
+      const values=await read();
+      if(values)return values;
+      if(!opened){
+        const button=page.getByRole('button',{name:/Experience level/i}).first();
+        if(await button.isVisible().catch(()=>false)){await button.click();opened=true;}
+      }
+      await sleep(100);
+    }
+    throw unavailable();
   }
   async function closeDraft(page){
     const dialogs=page.locator('[role="dialog"]');
@@ -49,6 +84,7 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
     async isSignedIn(){return signedIn(await session.open());},
     async *findJobs(search,{scanLimit=100,signal}={}){
       const page=await session.open(),seen=new Set();
+      let experienceValues=null;
       for(const title of search.titles){
         for(let start=0;start<1000 && seen.size<scanLimit;start+=25){
           checkStopped(signal);
@@ -56,8 +92,17 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
           url.searchParams.set('keywords',title);url.searchParams.set('location',search.location);url.searchParams.set('f_AL','true');url.searchParams.set('start',String(start));
           const workplaces={onsite:'1',remote:'2',hybrid:'3'};
           if(workplaces[search.workplace])url.searchParams.set('f_WT',workplaces[search.workplace]);
+          if(experienceValues)url.searchParams.set('f_E',experienceValues);
           await page.goto(url.href,{waitUntil:'domcontentloaded'});
           const pause=await interruption(page);if(pause)throw new Error(pause);
+          if(search.experienceLevels?.length && !experienceValues){
+            experienceValues=await experienceFilterValues(page,search.experienceLevels,signal);
+            checkStopped(signal);
+            url.searchParams.set('f_E',experienceValues);
+            await page.goto(url.href,{waitUntil:'domcontentloaded'});
+            const interrupted=await interruption(page);if(interrupted)throw new Error(interrupted);
+          }
+          if(search.experienceLevels?.length)await experienceFilterValues(page,search.experienceLevels,signal,{confirm:true});
           await page.locator('a[href*="/jobs/view/"]').first().waitFor({state:'attached',timeout:action}).catch(()=>{});
           let found=[];
           for(let scroll=0;scroll<4;scroll++){

@@ -2,8 +2,8 @@
 
 Verified on this Linux desktop with Node 24.21.0 and Playwright 1.62.1.
 
-- `npm test`: 35/35 unit, runner, storage, and localhost API tests pass.
-- `npm run test:browser`: 26/26 local Chromium fixture/dashboard scenarios pass.
+- `npm test`: 37/37 unit, runner, storage, and localhost API tests pass.
+- `npm run test:browser`: 34/34 local Chromium fixture/dashboard scenarios pass.
 - Visible Chromium launch and fixture sign-in detection pass.
 - Shell/JavaScript syntax and Git whitespace checks pass.
 - Desktop and mobile screenshots inspected by the author; no mobile document overflow.
@@ -60,6 +60,36 @@ after the owner closed. No personal browser profile or live LinkedIn was used.
 This changes the server's browser code. Restart the app in its terminal and
 refresh the dashboard to load it. Saved profile data and cookies are retained;
 the fix does not delete browser locks or stop other browser processes.
+
+## Search selection update — 2026-10-02
+
+Settings now offers the six LinkedIn job-search experience categories with
+multiple selection and an any/all Include keywords mode. Empty experience
+selections retain any level; older saved configurations retain all-keyword
+matching. Exclusions continue to reject any matching description.
+
+Experience labels were researched using LinkedIn's official
+[experience-level reference](https://learn.microsoft.com/en-us/linkedin/shared/references/reference-tables/experience-level-codes)
+and [filter guidance](https://www.linkedin.com/help/linkedin/answer/a507441/filter-and-sort-job-search-results?lang=en).
+Those references do not document numeric job-search filter values. A bounded
+public guest check did not establish their meaning. The adapter therefore reads
+values from LinkedIn's labeled native checkboxes and confirms the exact checked
+levels after applying them, before accepting each page's results. It waits within
+the action deadline for delayed controls. Missing controls, ignored selections,
+and selections widened to other experience levels stop discovery.
+
+Domain, Settings, and adapter regressions were observed failing before their
+fixes. A separate reviewer identified delayed-filter rendering and missing
+selection confirmation; both were reproduced, fixed, and reviewed with no
+remaining material findings. Fresh full suites pass: 37 unit/API tests and 34
+browser scenarios. Tests cover all six levels, multiple selection, changed filter
+values, delayed controls, popup loading, ignored/widened selections, confirmation
+on later pages, clearing selections, and any/all matching with exclusions.
+Desktop and 390px mobile Settings screenshots were inspected without overflow.
+
+Live authenticated LinkedIn compatibility remains unverified; browser tests use
+local fixtures. This implements the requested experience-selection option.
+Restart the server and refresh the dashboard before saving the new settings.
 
 ## Execution record
 

@@ -60,9 +60,9 @@ test('browser: dashboard setup, answers, controls and CSV work without rendering
   await page.screenshot({path:resolve('test-artifacts/dashboard-mobile.png'),fullPage:true});
 });
 
-async function settingsPage(t,profile={}){
+async function settingsPage(t,profile={},search={}){
   const dir=await mkdtemp(join(tmpdir(),'job-applier-settings-')),store=await createStore(dir);
-  await store.saveConfig({profile});
+  await store.saveConfig({profile,search});
   const runner={getStatus:()=>({state:'idle',todayCount:0,message:'Ready',currentJob:null}),stop:async()=>{}};
   const app=await createApp({dataDir:dir,store,runner,port:0});await app.listen();
   const browser=await chromium.launch({headless:true}),page=await browser.newPage();
@@ -184,4 +184,46 @@ test('browser: country typing updates suggestions without clearing state until a
   await region.fill('ON');await region.press('Enter');
   await page.getByText('Settings saved',{exact:true}).waitFor();
   assert.equal((await store.getConfig()).profile.country,'Canada');assert.equal((await store.getConfig()).profile.state,'Ontario');
+});
+
+test('browser: experience filters and keyword matching persist across reload and levels can be cleared',async t=>{
+  const {store,page}=await settingsPage(t,{}, {titles:['Software Engineer'],includeKeywords:['Python','Remote'],excludeKeywords:['Unpaid']});
+  const levels=page.getByRole('group',{name:'Experience level',exact:true});
+  const keywordMatch=page.getByRole('combobox',{name:'Keyword matching',exact:true});
+  assert.equal(await levels.getByRole('checkbox').count(),6);
+  assert.equal(await levels.getByRole('checkbox',{checked:true}).count(),0);
+  assert.equal(await keywordMatch.inputValue(),'all');
+  assert.match(await page.locator('#include-help').textContent(),/All must match/);
+  await levels.getByRole('checkbox',{name:'Internship',exact:true}).check();
+  await levels.getByRole('checkbox',{name:'Entry level',exact:true}).check();
+  await keywordMatch.selectOption('any');
+  assert.match(await page.locator('#include-help').textContent(),/Any can match/);
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Settings saved'&&!document.querySelector('#save-settings').disabled);
+  let search=(await store.getConfig()).search;
+  assert.deepEqual(search.experienceLevels,['INTERNSHIP','ENTRY_LEVEL']);
+  assert.equal(search.keywordMatch,'any');
+  assert.deepEqual(search.titles,['Software Engineer']);
+  assert.deepEqual(search.includeKeywords,['Python','Remote']);
+  assert.deepEqual(search.excludeKeywords,['Unpaid']);
+  await page.reload();await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#save-settings').disabled);
+  assert.equal(await levels.getByRole('checkbox',{name:'Internship',exact:true}).isChecked(),true);
+  assert.equal(await levels.getByRole('checkbox',{name:'Entry level',exact:true}).isChecked(),true);
+  assert.equal(await levels.getByRole('checkbox',{checked:true}).count(),2);
+  assert.equal(await keywordMatch.inputValue(),'any');
+  assert.match(await page.locator('#include-help').textContent(),/Any can match/);
+  await keywordMatch.selectOption('all');
+  assert.match(await page.locator('#include-help').textContent(),/All must match/);
+  await levels.getByRole('checkbox',{name:'Internship',exact:true}).uncheck();
+  await levels.getByRole('checkbox',{name:'Entry level',exact:true}).uncheck();
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Settings saved'&&!document.querySelector('#save-settings').disabled);
+  search=(await store.getConfig()).search;
+  assert.deepEqual(search.experienceLevels,[]);
+  assert.equal(search.keywordMatch,'all');
+  await page.reload();await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#save-settings').disabled);
+  assert.equal(await levels.getByRole('checkbox',{checked:true}).count(),0);
+  assert.equal(await keywordMatch.inputValue(),'all');
 });

@@ -9,11 +9,12 @@ const aliases = {
 };
 export const statuses = new Set(['skipped','needs_answer','ready','submission_pending','submitted','unconfirmed','failed']);
 export const MAX_RESUME_BYTES = 2_000_000;
+const experienceLevelCodes=new Set(['INTERNSHIP','ENTRY_LEVEL','ASSOCIATE','MID_SENIOR_LEVEL','DIRECTOR','EXECUTIVE']);
 
 export function defaultConfig() {
   return {
     profile:Object.fromEntries(profileKeys.map(key=>[key,''])),
-    search:{titles:[],location:'',workplace:'any',includeKeywords:[],excludeKeywords:[]},
+    search:{titles:[],location:'',workplace:'any',experienceLevels:[],includeKeywords:[],excludeKeywords:[],keywordMatch:'all'},
     dailyCap:10, scanLimit:100, intervalSeconds:45, timezone:'America/Chicago', resume:null, dryRun:false
   };
 }
@@ -63,6 +64,15 @@ export function validateConfig(input,{profileLinks=true}={}) {
   if (input.search !== undefined) {
     object(input.search,'Search');
     for (const key of ['titles','includeKeywords','excludeKeywords']) if (input.search[key] !== undefined) config.search[key] = list(input.search[key],key);
+    if(input.search.experienceLevels!==undefined){
+      const levels=list(input.search.experienceLevels,'Experience levels');
+      if(levels.some(level=>!experienceLevelCodes.has(level)))throw new Error('Choose valid LinkedIn experience levels');
+      config.search.experienceLevels=levels;
+    }
+    if(input.search.keywordMatch!==undefined){
+      if(!['all','any'].includes(input.search.keywordMatch))throw new Error('Keyword matching must be all or any');
+      config.search.keywordMatch=input.search.keywordMatch;
+    }
     if (input.search.location !== undefined) config.search.location = string(input.search.location,'Location');
     if (input.search.workplace !== undefined) {
       if (!['any','remote','hybrid','onsite'].includes(input.search.workplace)) throw new Error('Invalid workplace preference');
@@ -143,7 +153,9 @@ export function resolveAnswer(field,profile,answers) {
 }
 export function matchesJob(description,search) {
   const text = String(description).toLowerCase();
-  return search.includeKeywords.every(term=>text.includes(term.toLowerCase())) && !search.excludeKeywords.some(term=>text.includes(term.toLowerCase()));
+  const includes=search.includeKeywords,match=term=>text.includes(term.toLowerCase());
+  const included=!includes.length || (search.keywordMatch==='any'?includes.some(match):includes.every(match));
+  return included && !search.excludeKeywords.some(match);
 }
 export function dayKey(date,timezone) {
   const parts = new Intl.DateTimeFormat('en-US',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(date));

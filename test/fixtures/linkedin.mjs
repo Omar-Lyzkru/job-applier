@@ -18,7 +18,15 @@ export async function startFixture(scenario='success') {
       state.searches.push(Object.fromEntries(url.searchParams));
       const start=Number(url.searchParams.get('start')||0);
       const ids=start===0?[1001,1002]:start===25?[1003,1004]:[];
-      res.end(`<nav><a href="/jobs/">Jobs</a></nav><ul>${ids.map(id=>`<li><a href="/jobs/view/${id}/"><strong>Software Engineer ${id}</strong></a><span class="artdeco-entity-lockup__subtitle">Example</span></li>`).join('')}</ul>`);
+      const levels=['Internship','Entry level','Associate','Mid-Senior level','Director','Executive'];
+      const selected=new Set(scenario==='experience-ignored'||(scenario==='experience-ignored-later'&&start>0)?[]:(url.searchParams.get('f_E')||'').split(','));
+      if(scenario==='experience-widened' && url.searchParams.has('f_E'))selected.add('4');
+      const experienceOptions=`<fieldset><legend>Experience level</legend>${levels.map((label,index)=>{
+        const value=String((index+1)*(scenario==='experience-values'?11:1));
+        return `<label><input type="checkbox" name="f_E" value="${value}"${selected.has(value)?' checked':''}>${label}${scenario==='experience-popup'?' (123)':''}</label>`;
+      }).join('')}</fieldset>`;
+      const experience=scenario==='experience-unavailable'?'':scenario==='experience-popup'?`<button id="experience">Experience level</button><div id="experience-options"></div><script>document.querySelector('#experience').onclick=()=>setTimeout(()=>{document.querySelector('#experience-options').innerHTML=${JSON.stringify(experienceOptions)};},150);</script>`:scenario==='experience-delayed'?`<div id="experience-options"></div><script>setTimeout(()=>{document.querySelector('#experience-options').innerHTML=${JSON.stringify(experienceOptions)};},250);</script>`:experienceOptions;
+      res.end(`<nav><a href="/jobs/">Jobs</a></nav>${experience}<ul>${ids.map(id=>`<li><a href="/jobs/view/${id}/"><strong>Software Engineer ${id}</strong></a><span class="artdeco-entity-lockup__subtitle">Example</span></li>`).join('')}</ul>`);
       return;
     }
     if (!url.pathname.startsWith('/jobs/view')) {res.end('<nav><a href="/jobs/">Jobs</a></nav><h1>Feed</h1>');return;}

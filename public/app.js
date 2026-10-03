@@ -42,9 +42,16 @@ function fillSettings(){
   fillLocations(config.profile.country,config.profile.state);
   for(const key of ['titles','includeKeywords','excludeKeywords'])form.elements.namedItem(`search.${key}`).value=config.search[key].join('\n');
   for(const key of ['location','workplace'])form.elements.namedItem(`search.${key}`).value=config.search[key];
+  for(const input of form.querySelectorAll('[name="search.experienceLevels"]'))input.checked=(config.search.experienceLevels||[]).includes(input.value);
+  form.elements.namedItem('search.keywordMatch').value=config.search.keywordMatch||'all';
+  updateKeywordHelp();
   for(const key of ['dailyCap','scanLimit','intervalSeconds','timezone'])form.elements.namedItem(key).value=config[key];
   byId('dry-run').checked=config.dryRun;
 }
+function updateKeywordHelp(){
+  byId('include-help').textContent=byId('keyword-match').value==='any'?'Any can match · one per line':'All must match · one per line';
+}
+byId('keyword-match').addEventListener('change',updateKeywordHelp);
 const locationKey=value=>String(value||'').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
 function findCountry(value){
   const key=locationKey(value),aliases={usa:'US',unitedstatesofamerica:'US',uk:'GB',greatbritain:'GB'};
@@ -172,6 +179,8 @@ byId('settings-form').addEventListener('submit',event=>{
   for(const key of profileKeys)profile[key]=String(values.get(`profile.${key}`)||'').trim();
   for(const key of ['titles','includeKeywords','excludeKeywords'])search[key]=String(values.get(`search.${key}`)||'').split('\n').map(item=>item.trim()).filter(Boolean);
   for(const key of ['location','workplace'])search[key]=String(values.get(`search.${key}`)||'').trim();
+  search.experienceLevels=values.getAll('search.experienceLevels');
+  search.keywordMatch=String(values.get('search.keywordMatch')||'all');
   const config={...state.config,profile,search,dryRun:byId('dry-run').checked};
   for(const key of ['dailyCap','scanLimit','intervalSeconds'])config[key]=Number(values.get(key));config.timezone=String(values.get('timezone')||'').trim();
   perform(async()=>{

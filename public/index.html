@@ -41,6 +41,12 @@
             <div class="field span-2"><label for="search-titles">Job titles</label><textarea id="search-titles" name="search.titles" rows="3" aria-describedby="titles-help" placeholder="Software Engineer&#10;Backend Developer"></textarea><small id="titles-help">One title per line</small></div>
             <label class="span-2">Search location<input name="search.location" placeholder="Chicago, Illinois, United States"></label>
             <label class="span-2">Workplace<select name="search.workplace"><option value="any">Any workplace</option><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="onsite">On-site</option></select></label>
+            <fieldset class="experience-field span-2" aria-describedby="experience-help"><legend>Experience level</legend><div class="experience-options">
+              <label><input type="checkbox" name="search.experienceLevels" value="INTERNSHIP">Internship</label><label><input type="checkbox" name="search.experienceLevels" value="ENTRY_LEVEL">Entry level</label>
+              <label><input type="checkbox" name="search.experienceLevels" value="ASSOCIATE">Associate</label><label><input type="checkbox" name="search.experienceLevels" value="MID_SENIOR_LEVEL">Mid-Senior level</label>
+              <label><input type="checkbox" name="search.experienceLevels" value="DIRECTOR">Director</label><label><input type="checkbox" name="search.experienceLevels" value="EXECUTIVE">Executive</label>
+            </div><small id="experience-help">Select several or leave all clear for any experience level. Use Entry level for junior searches and Mid-Senior level for senior searches.</small></fieldset>
+            <label class="span-2" for="keyword-match">Keyword matching<select id="keyword-match" name="search.keywordMatch"><option value="all">Match all keywords</option><option value="any">Match any keyword</option></select></label>
             <div class="field"><label for="include-keywords">Include keywords</label><textarea id="include-keywords" name="search.includeKeywords" rows="3" aria-describedby="include-help" placeholder="Python&#10;Remote"></textarea><small id="include-help">All must match · one per line</small></div><div class="field"><label for="exclude-keywords">Exclude keywords</label><textarea id="exclude-keywords" name="search.excludeKeywords" rows="3" aria-describedby="exclude-help" placeholder="Unpaid"></textarea><small id="exclude-help">Any match skips the job</small></div>
           </div></article>
         </div>

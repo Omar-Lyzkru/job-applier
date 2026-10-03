@@ -31,6 +31,10 @@ Profile, answer, and résumé edits take effect in the next run. **Stop** preven
 
 Country and state / region accept typing and show dropdown suggestions. Enter or choose a country to see its regions; finishing a change to a different country clears the previous region. Saved locations remain visible, recognized abbreviations save as full names, and custom typed values are preserved. LinkedIn and portfolio links accept addresses such as `www.linkedin.com/in/your-name` or `example.com`; saving adds `https://` automatically. Both links are optional.
 
+**Experience level** lets you select Internship, Entry level, Associate, Mid-Senior level, Director, and Executive. Choose several or leave them all clear for any level. For junior searches, start with Entry level; for senior searches, use Mid-Senior level. These use [LinkedIn's experience categories](https://learn.microsoft.com/en-us/linkedin/shared/references/reference-tables/experience-level-codes). The app reads LinkedIn's filter values and confirms your exact selection on each results page. If LinkedIn's filter controls are unavailable or the selection cannot be confirmed, the run stops with instructions to check the filters.
+
+**Keyword matching** controls Include keywords: **Match all keywords** requires every listed term; **Match any keyword** accepts at least one. An empty Include keywords field allows any description. Exclude keywords always skip a job if any listed term appears. Older settings retain Match all keywords until you change it. For example, Match any keyword can accept a Python role even when it does not also mention C++.
+
 ## Results
 
 - **Submitted:** observed LinkedIn confirmation after Submit.
@@ -69,6 +73,7 @@ Live job submission requires your account sign-in and profile setup. LinkedIn's 
 - **Browser profile already open:** close the older Job Applier Chromium window, then choose **Open LinkedIn** again. The app reuses its live browser when its LinkedIn tab closes and waits for closure before reopening. Keep the saved browser profile so your sign-in remains available.
 - **Missing Linux browser libraries:** use Playwright's documented `npx playwright install-deps chromium` on your machine, then retry. This may need administrator permission.
 - **Sign-in expired / verification:** Open LinkedIn, complete it in the browser, then start a new run.
+- **Experience filter unavailable / unconfirmed:** check LinkedIn's search filters in its browser, or clear the Experience level choices in Settings and save before retrying. The app does not accept results when a selected experience filter cannot be confirmed.
 - **Unsupported field / résumé verification failure:** inspect that application in LinkedIn. The app records the reason instead of guessing or claiming success.
 - **Port occupied:** use `JOB_APPLIER_PORT=3211 ./start.sh` and the URL printed in the terminal.
 
