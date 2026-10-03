@@ -4,7 +4,7 @@ const byId=id=>document.getElementById(id);
 const profileKeys=['firstName','lastName','email','phone','city','state','postalCode','country','linkedinUrl','website'];
 const resultNames={submitted:'Submitted',unconfirmed:'Unconfirmed',submission_pending:'Submission pending',needs_answer:'Needs answer',ready:'Ready — dry run',skipped:'Skipped',failed:'Failed'};
 const pageCopy={dashboard:['Your application workspace','Find matching jobs and apply using your saved profile.'],settings:['Set up your next search','Your profile, résumé, and preferences for the next run.'],answers:['Saved answers','Your answers to the questions employers ask.'],history:['Application history','A record of what was submitted, skipped, or needs attention.']};
-let state=null,ready=false,busy=false,view='dashboard',toastTimer,questionSignature='',answerSignature='',controlId=0;
+let state=null,ready=false,busy=false,view='dashboard',toastTimer,questionSignature='',answerSignature='',controlId=0,committedCountry='';
 const create=(tag,className,text)=>{const element=document.createElement(tag);if(className)element.className=className;if(text!==undefined)element.textContent=String(text);return element;};
 function setView(next){
   view=next;
@@ -50,25 +50,34 @@ function findCountry(value){
   const key=locationKey(value),aliases={usa:'US',unitedstatesofamerica:'US',uk:'GB',greatbritain:'GB'};
   return countries.find(country=>country.code===aliases[key] || locationKey(country.code)===key || locationKey(country.name)===key);
 }
-function locationOptions(select,entries,selected,placeholder){
-  const prompt=create('option',null,placeholder);prompt.value='';
-  const match=entries.find(entry=>locationKey(entry.name)===locationKey(selected) || locationKey(entry.code)===locationKey(selected));
-  const options=entries.map(entry=>{const option=create('option',null,entry.name);option.value=entry.name;return option;});
-  if(selected&&!match){const current=create('option',null,`${selected} (saved)`);current.value=selected;options.unshift(current);}
-  select.replaceChildren(prompt,...options);select.value=match?.name||selected||'';
+function locationOptions(input,entries,selected){
+  const options=entries.map(entry=>{const option=create('option');option.value=entry.name;return option;});
+  byId(input.getAttribute('list')).replaceChildren(...options);
+  if(selected!==undefined){
+    const match=selected&&entries.find(entry=>locationKey(entry.name)===locationKey(selected) || locationKey(entry.code)===locationKey(selected));
+    input.value=match?.name||selected||'';
+  }
 }
-function fillRegions(countryValue,selected=''){
+function fillRegions(countryValue,selected){
   const country=findCountry(countryValue);
-  locationOptions(byId('settings-form').elements.namedItem('profile.state'),country?.regions||[],selected,!country?'Choose a country first':country.regions.length?'Choose a state / region':'No state / region needed');
+  locationOptions(byId('settings-form').elements.namedItem('profile.state'),country?.regions||[],selected);
 }
 function fillLocations(countryValue,regionValue){
   const country=findCountry(countryValue);
-  // Recognize saved abbreviations while keeping unknown saved values available.
-  const entries=countries.map(entry=>entry===country?{...entry,code:countryValue}:entry);
-  locationOptions(byId('settings-form').elements.namedItem('profile.country'),entries,countryValue,'Choose a country');
+  locationOptions(byId('settings-form').elements.namedItem('profile.country'),countries,country?.name||countryValue);
   fillRegions(countryValue,regionValue);
+  committedCountry=country?.code||locationKey(countryValue);
 }
-byId('settings-form').elements.namedItem('profile.country').addEventListener('change',event=>fillRegions(event.target.value));
+function commitCountry(){
+  const form=byId('settings-form'),input=form.elements.namedItem('profile.country'),region=form.elements.namedItem('profile.state');
+  const country=findCountry(input.value),key=country?.code||locationKey(input.value);
+  input.value=country?.name||input.value.trim();
+  fillRegions(input.value,key===committedCountry?region.value.trim():'');
+  committedCountry=key;
+}
+byId('settings-form').elements.namedItem('profile.country').addEventListener('input',event=>fillRegions(event.target.value));
+byId('settings-form').elements.namedItem('profile.country').addEventListener('change',commitCountry);
+byId('settings-form').elements.namedItem('profile.state').addEventListener('change',event=>fillRegions(byId('settings-form').elements.namedItem('profile.country').value,event.target.value.trim()));
 function jobAnchor(job,className='job-title'){
   const valid=/^\d+$/.test(String(job.id)),element=create(valid?'a':'span',className,job.title||'LinkedIn job');
   if(valid){element.href=`https://www.linkedin.com/jobs/view/${job.id}/`;element.target='_blank';element.rel='noopener noreferrer';}
@@ -159,7 +168,7 @@ byId('stop-button').addEventListener('click',()=>perform(()=>api('/api/stop',{})
 byId('browser-button').addEventListener('click',()=>perform(()=>api('/api/browser',{}),'LinkedIn browser opened'));
 byId('history-search').addEventListener('input',()=>{if(state)renderHistory();});byId('history-filter').addEventListener('change',()=>{if(state)renderHistory();});
 byId('settings-form').addEventListener('submit',event=>{
-  event.preventDefault();const values=new FormData(event.currentTarget),profile={},search={};
+  event.preventDefault();commitCountry();const values=new FormData(event.currentTarget),profile={},search={};
   for(const key of profileKeys)profile[key]=String(values.get(`profile.${key}`)||'').trim();
   for(const key of ['titles','includeKeywords','excludeKeywords'])search[key]=String(values.get(`search.${key}`)||'').split('\n').map(item=>item.trim()).filter(Boolean);
   for(const key of ['location','workplace'])search[key]=String(values.get(`search.${key}`)||'').trim();

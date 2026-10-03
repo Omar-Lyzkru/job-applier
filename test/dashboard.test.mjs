@@ -90,18 +90,19 @@ test('browser: saving bare profile links works with Enter and persists normalize
 test('browser: country and state dropdowns preserve saved values and clear stale states on country changes',async t=>{
   const {store,page}=await settingsPage(t,{country:'USA',state:'Texas'});
   const country=page.getByRole('combobox',{name:'Country',exact:true}),region=page.getByRole('combobox',{name:'State / region',exact:true});
-  assert.equal(await country.locator('option:checked').textContent(),'United States');
+  assert.equal(await country.inputValue(),'United States');
   assert.equal(await region.inputValue(),'Texas');
-  assert.ok(await country.locator('option').count()>200);
-  await region.selectOption({label:'California'});
+  assert.ok(await page.locator('#country-options option').count()>200);
+  await region.fill('California');
   await page.getByRole('button',{name:'Save settings',exact:true}).click();
   await page.getByText('Settings saved',{exact:true}).waitFor();
   assert.equal((await store.getConfig()).profile.country,'United States');
   assert.equal((await store.getConfig()).profile.state,'California');
-  await country.selectOption({label:'Canada'});
+  await country.fill('Canada');await country.press('Tab');
   assert.equal(await region.inputValue(),'');
-  assert.equal(await region.locator('option').filter({hasText:'Texas'}).count(),0);
-  await region.selectOption({label:'Ontario'});
+  assert.equal(await page.locator('#region-options option[value=Texas]').count(),0);
+  assert.equal(await page.locator('#region-options option[value=Ontario]').count(),1);
+  await region.fill('Ontario');
   await page.getByRole('button',{name:'Save settings',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Settings saved'&&!document.querySelector('#save-settings').disabled);
   assert.equal((await store.getConfig()).profile.country,'Canada');
@@ -118,9 +119,9 @@ test('browser: dropdowns keep unlisted saved locations until explicitly changed'
   await page.getByRole('button',{name:'Save settings',exact:true}).click();
   await page.getByText('Settings saved',{exact:true}).waitFor();
   assert.equal((await store.getConfig()).profile.state,'Custom region');
-  await country.selectOption({label:'United States'});
+  await country.fill('United States');await country.press('Tab');
   assert.equal(await region.inputValue(),'');
-  await region.selectOption({label:'Texas'});
+  await region.fill('Texas');
   assert.equal(await region.inputValue(),'Texas');
 });
 
@@ -153,4 +154,34 @@ test('browser: recognized location abbreviations save as full names for applicat
   await page.getByText('Settings saved',{exact:true}).waitFor();
   assert.equal((await store.getConfig()).profile.country,'United States');
   assert.equal((await store.getConfig()).profile.state,'Texas');
+});
+
+test('browser: typed country and state values save and survive reload even without a suggestion match',async t=>{
+  const {store,page}=await settingsPage(t);
+  const country=page.getByRole('combobox',{name:'Country',exact:true}),region=page.getByRole('combobox',{name:'State / region',exact:true});
+  await country.fill('Custom country');await country.press('Tab');
+  await region.fill('Custom region');
+  await region.press('Enter');
+  await page.getByText('Settings saved',{exact:true}).waitFor();
+  assert.equal((await store.getConfig()).profile.country,'Custom country');
+  assert.equal((await store.getConfig()).profile.state,'Custom region');
+  await page.reload();await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#save-settings').disabled);
+  assert.equal(await country.inputValue(),'Custom country');assert.equal(await region.inputValue(),'Custom region');
+});
+
+test('browser: country typing updates suggestions without clearing state until a different country is committed',async t=>{
+  const {store,page}=await settingsPage(t,{country:'United States',state:'Texas'});
+  const country=page.getByRole('combobox',{name:'Country',exact:true}),region=page.getByRole('combobox',{name:'State / region',exact:true});
+  await country.fill('Can');
+  assert.equal(await country.inputValue(),'Can');assert.equal(await region.inputValue(),'Texas');
+  await country.fill('USA');await country.press('Tab');
+  assert.equal(await country.inputValue(),'United States');assert.equal(await region.inputValue(),'Texas');
+  await country.fill('Canada');
+  assert.equal(await page.locator('#region-options option[value=Ontario]').count(),1);
+  assert.equal(await region.inputValue(),'Texas');
+  await country.press('Tab');assert.equal(await region.inputValue(),'');
+  await region.fill('ON');await region.press('Enter');
+  await page.getByText('Settings saved',{exact:true}).waitFor();
+  assert.equal((await store.getConfig()).profile.country,'Canada');assert.equal((await store.getConfig()).profile.state,'Ontario');
 });

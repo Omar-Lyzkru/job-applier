@@ -3,7 +3,7 @@
 Verified on this Linux desktop with Node 24.21.0 and Playwright 1.62.1.
 
 - `npm test`: 33/33 unit, runner, storage, and localhost API tests pass.
-- `npm run test:browser`: 20/20 local Chromium fixture/dashboard scenarios pass.
+- `npm run test:browser`: 22/22 local Chromium fixture/dashboard scenarios pass.
 - Visible Chromium launch and fixture sign-in detection pass.
 - Shell/JavaScript syntax and Git whitespace checks pass.
 - Desktop and mobile screenshots inspected by the author; no mobile document overflow.
@@ -31,6 +31,16 @@ and no mobile document overflow. A separate reviewer identified the legacy résu
 upload regression; it was reproduced and fixed with a dedicated API test. No
 other material review findings remain. The user's running server was left in
 their terminal; restart it and refresh the page to load the update.
+
+The follow-up typing update replaces the location selects with editable inputs
+and local dropdown suggestions. Custom typed countries and states survive saving
+and reload. Typing updates state suggestions without erasing the current state;
+a committed change to a different country clears it. Country aliases retain the
+same region, and recognized abbreviations normalize on commit/save. Both new
+typing regressions failed against the old selects before implementation. Fresh
+suites pass with 33 unit/API tests and 22 browser scenarios. Desktop and mobile
+Settings screenshots were inspected. This follow-up changes browser assets only;
+the running app serves them after the page is refreshed.
 
 ## Execution record
 
