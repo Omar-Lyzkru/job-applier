@@ -4,7 +4,7 @@ import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {chromium} from 'playwright';
-import {discoverFields,fillApplicationFields} from '../src/browser/forms.mjs';
+import {discoverFields,fillApplicationFields,validationErrors} from '../src/browser/forms.mjs';
 import {modernApplication} from './fixtures/modern-application.mjs';
 
 async function setup(t,scenario={}){
@@ -40,6 +40,25 @@ test('modern résumé upload waits until the new card is accepted, not merely pr
   assert.equal(applicationState.resumeVerified,true);
   assert.ok(await page.evaluate(()=>window.acceptedDocument));
   assert.equal(await page.locator('#resume-region').getAttribute('aria-busy'),null);
+});
+
+test('résumé success alert is accepted only after the fresh document is verified',async t=>{
+  const {page,dialog,options,applicationState}=await setup(t);
+  assert.deepEqual(await fillApplicationFields(dialog,options),{questions:[],errors:[]});
+  await page.evaluate(()=>document.querySelector('[role=dialog]').insertAdjacentHTML('beforeend','<p role="alert">Resume uploaded successfully</p>'));
+  assert.deepEqual(await validationErrors(dialog),['Resume uploaded successfully']);
+  assert.deepEqual(await validationErrors(dialog,applicationState),[]);
+});
+
+test('verified résumé success never hides other alerts or invalid native fields',async t=>{
+  const {page,dialog,options,applicationState}=await setup(t);
+  await fillApplicationFields(dialog,options);
+  await page.evaluate(()=>document.querySelector('[role=dialog]').insertAdjacentHTML('beforeend','<p role="alert">Resume uploaded successfully</p><p role="alert">Please enter a valid phone number</p><p role="alert">Resume uploaded successfully, but processing failed</p><label>Email<input type="email" required value="invalid"></label>'));
+  const errors=await validationErrors(dialog,applicationState);
+  assert.equal(errors.includes('Resume uploaded successfully'),false);
+  assert.ok(errors.includes('Please enter a valid phone number'));
+  assert.ok(errors.includes('Resume uploaded successfully, but processing failed'));
+  assert.ok(errors.some(error=>error.includes('@')),'Native email validation was lost');
 });
 
 test('failed modern upload never accepts the old same-named résumé or a pending new card',async t=>{

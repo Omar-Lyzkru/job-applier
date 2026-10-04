@@ -121,6 +121,25 @@ test('browser: safety reminder waits for hydrated application fields before reac
   const page=await adapter.openBrowser();
   assert.equal(await page.getByRole('dialog').count(),0,'Native application draft was not discarded');
 });
+test('browser: loaded application page progress permits review and one guarded submission',async t=>{
+  for(const dryRun of [true,false]){
+    const {adapter,fixture,options}=await setup(t,'page-progress',{action:700});
+    const result=await adapter.apply({...job},{...options,dryRun});
+    assert.equal(result.status,dryRun?'ready':'submitted',JSON.stringify(result));
+    assert.deepEqual(fixture.state.events,dryRun?[]:['guard','submit']);
+  }
+});
+test('browser: page counters do not hide busy forms or upload/loading progress',async t=>{
+  for(const scenario of ['page-progress-busy','upload-progress','indeterminate-progress','unrelated-page-counter']){
+    const {adapter,fixture,options}=await setup(t,scenario,{action:700});
+    const result=await adapter.apply({...job},options);
+    assert.equal(result.status,'paused',scenario+': '+JSON.stringify(result));
+    assert.match(result.reason,/form.*loading/);
+    assert.deepEqual(fixture.state.events,[]);
+    const page=await adapter.openBrowser();
+    assert.equal(await page.getByRole('dialog').locator('input[name=first]').inputValue(),'','A loading form was filled');
+  }
+});
 test('browser: unfamiliar safety warning pauses without choosing or dismissing it',async t=>{
   const {adapter,fixture,options}=await setup(t,'safety-unknown');
   const result=await adapter.apply({...job},{...options,dryRun:true});
@@ -165,6 +184,22 @@ test('browser: delayed same-filename upload waits for acceptance and selects the
   assert.equal(result.status,'submitted',JSON.stringify(result));
   assert.equal(fixture.state.fields.resumeContent,'%PDF-1.4\nfixture');
   assert.equal(fixture.state.fields.documentId,'new-upload');
+});
+test('browser: verified résumé success alert permits review and one guarded submission',async t=>{
+  for(const dryRun of [true,false]){
+    const {adapter,fixture,options}=await setup(t,'resume-success-alert');
+    const result=await adapter.apply({...job},{...options,dryRun});
+    assert.equal(result.status,dryRun?'ready':'submitted',JSON.stringify(result));
+    assert.deepEqual(fixture.state.events,dryRun?[]:['guard','submit']);
+    if(!dryRun)assert.equal(fixture.state.fields.documentId,'new-upload');
+  }
+});
+test('browser: genuine validation alert still blocks after a verified résumé upload',async t=>{
+  const {adapter,fixture,options}=await setup(t,'resume-error-alert');
+  const result=await adapter.apply({...job},options);
+  assert.equal(result.status,'failed',JSON.stringify(result));
+  assert.match(result.reason,/Document processing failed/);
+  assert.deepEqual(fixture.state.events,[]);
 });
 test('browser: upload that never becomes an accepted selected document blocks submission',async t=>{
   const {adapter,fixture,options}=await setup(t,'upload-failure');

@@ -215,11 +215,11 @@ export async function fillApplicationFields(dialog,{profile,answers,resumePath,s
   }
   return {questions,errors};
 }
-export async function validationErrors(dialog) {
-  return dialog.evaluate(root=>{
+export async function validationErrors(dialog,{resumeVerified=false}={}) {
+  return dialog.evaluate((root,resumeVerified)=>{
     const visible=el=>Boolean(el.getClientRects().length);
-    const errors=Array.from(root.querySelectorAll('[role="alert"],.artdeco-inline-feedback__message,.fb-dash-form-element__error-message')).filter(visible).map(el=>el.textContent.trim()).filter(Boolean);
+    const errors=Array.from(root.querySelectorAll('[role="alert"],.artdeco-inline-feedback__message,.fb-dash-form-element__error-message')).filter(visible).map(el=>el.textContent.trim()).filter(message=>message && !(resumeVerified && /^r[eé]sum[eé] uploaded successfully[.!]?$/i.test(message.replace(/\s+/g,' '))));
     for(const el of root.querySelectorAll('input,select,textarea'))if(visible(el)&&!el.disabled&&el.willValidate&&!el.checkValidity())errors.push(el.validationMessage||'A required field is incomplete');
     return [...new Set(errors)];
-  });
+  },resumeVerified===true);
 }

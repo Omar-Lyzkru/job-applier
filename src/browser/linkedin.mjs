@@ -150,8 +150,27 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
         const headings=Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"]')).filter(visible).map(element=>element.innerText.trim());
         const controls=Array.from(root.querySelectorAll('input,select,textarea,[role="combobox"],[role="checkbox"],[role="radiogroup"],[role="listbox"],[role="textbox"],[contenteditable="true"]')).filter(element=>visible(element) && !['hidden','submit','button','reset'].includes(element.type)).map(element=>[element.tagName,element.type,element.name,element.getAttribute('aria-label'),element.required]);
         const actions=Array.from(root.querySelectorAll('button,[role="button"]')).filter(visible).map(element=>(element.getAttribute('aria-label')||element.innerText).trim()).filter(label=>/^(?:Next|Review|Continue)(?:\s|$)|^Submit application$/i.test(label));
-        const busy=Array.from(root.querySelectorAll('[aria-busy="true"],[role="progressbar"]')).some(visible);
-        return {headings,controls,actions,busy};
+        const bars=Array.from(root.querySelectorAll('[role="progressbar"]')).filter(visible);
+        const progress=bars.map(bar=>{
+          // LinkedIn's persistent page indicator is determinate and paired with
+          // an adjacent "1/5 pages" counter. Other progress bars remain loaders.
+          if(!bar.hasAttribute('aria-valuenow') || bar.getAttribute('aria-valuemin')!=='0' || bar.getAttribute('aria-valuemax')!=='100')return null;
+          const now=Number(bar.getAttribute('aria-valuenow'));
+          if(!Number.isFinite(now)||now<0||now>100)return null;
+          for(let area=bar.parentElement,depth=0;area&&area!==root&&depth<2;area=area.parentElement,depth++){
+            if(area.querySelector('input,select,textarea,button,[role="button"],[role="combobox"]') || area.querySelectorAll('[role="progressbar"]').length!==1)break;
+            for(const label of area.querySelectorAll('p,span,div')){
+              if(label.children.length||!visible(label))continue;
+              const match=label.textContent.trim().match(/^(\d+)\s*\/\s*(\d+)\s+pages?$/i);
+              if(!match)continue;
+              const page=Number(match[1]),total=Number(match[2]);
+              if(page>=1&&page<=total&&Math.abs(now-page/total*100)<=1)return [now,page,total];
+            }
+          }
+          return null;
+        });
+        const busy=root.getAttribute('aria-busy')==='true' || Array.from(root.querySelectorAll('[aria-busy="true"]')).some(visible) || progress.some(value=>value===null);
+        return {headings,controls,actions,busy,progress};
       }));
       const state=states[0];
       if(state){
@@ -258,7 +277,7 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
           const filled=await fillApplicationFields(dialog,{profile,answers,resumePath,signal,applicationState,uploadTimeout:action});
           if(filled.errors.length)return finish(page,{status:'failed',reason:filled.errors.join('; ')});
           if(filled.questions.length)return finish(page,{status:'needs_answer',reason:'Required or prefilled questions need explicit answers',pendingQuestions:filled.questions.map(question=>({...question,jobId:job.id}))});
-          const errors=await validationErrors(dialog);
+          const errors=await validationErrors(dialog,applicationState);
           if(errors.length)return finish(page,{status:'failed',reason:`Form validation: ${errors.join('; ')}`});
           const submit=dialog.getByRole('button',{name:/^Submit application$/i}).first();
           if(await submit.isVisible().catch(()=>false)){

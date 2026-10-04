@@ -169,6 +169,31 @@ the nested-description-button regression; it was reproduced and fixed. Modern
 form and cleanup regressions were likewise observed failing before their fixes.
 Restart the server and refresh the dashboard to load all application changes.
 
+## Latest application blockers — 2026-10-03
+
+The newest run exposed two false failures. Vilo's **Resume uploaded successfully**
+alert was collected as a validation error. That exact success message is now
+excluded only after the fresh uploaded document is verified and selected. Other
+alerts, combined success/error messages, and native invalid fields still block.
+
+GoQuant's loaded contact form contains a persistent SVG progress bar at 20%
+beside **1/5 pages**. Readiness previously treated every progress bar as a loader.
+The adapter now recognizes a local page counter only when its determinate value
+matches the page ratio, and includes it in the stable form snapshot. Busy forms,
+upload progress, indeterminate loaders, and unrelated page labels remain pauses.
+
+Both reported failures were reproduced in local browser regressions before the
+fixes. Fresh full suites pass: **60 unit/API tests and 70 browser scenarios**.
+JavaScript syntax and Git whitespace checks pass. A separate read-only reviewer
+found no actionable issues in these scoped changes.
+
+Signed-in live previews with the user's saved setup then reached **Review** for
+Vilo and **Needs answer** for GoQuant's English proficiency question. Both drafts
+were discarded cleanly. The previews used `dryRun: true` and a rejecting final
+submission guard; that guard was never called and no real application was
+submitted. Live submission confirmation remains unverified. Restart the server
+to load these fixes before starting another run.
+
 ## Execution record
 
 # SDD ledger — plan: docs/superpowers/plans/2026-10-01-linkedin-easy-apply.md
