@@ -169,7 +169,10 @@ Factor calculations are:
   and 2.5 if unavailable. External forms remain excluded by current support.
 - Interest: 5 for an explicit preferred company or prioritized role family;
   0 for a known nonpreferred company when a preference list is set; 2.5 when
-  no preference is set or company identity is unknown. Exclusions remain hard.
+  no preference is set or company identity is unknown. Explicit include terms
+  contribute 5 multiplied by their matched fraction as an interest preference,
+  never as skill evidence; take the maximum applicable interest value once.
+  Exclusions remain hard.
 
 Clamp each factor to its maximum and round the sum to the nearest whole point
 in 0–100. Use that displayed total for band and threshold decisions. Keep the
@@ -251,6 +254,11 @@ saved-question candidates. A generic question must not surface an unrelated
 legal, consent, salary, or certification answer merely because tokens overlap.
 Known explicit legal answers can still match their existing recognized meaning.
 No screening answer is inferred from the résumé or matching profile.
+The existing question-key normalization collapses C, C++, and C# in saved
+screening labels. This phase must not infer one of those skill identities from
+an ambiguous old key. Guard those recognized experience questions for review
+and exclude them from new automatic aliases; punctuation-aware job scoring is
+separate. A collision-safe stored-question migration remains deferred.
 
 Produce additive question groups at bootstrap while preserving raw pending
 occurrences. Group only the same answer key with compatible control type,
