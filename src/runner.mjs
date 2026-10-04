@@ -1,5 +1,8 @@
 import {stat} from 'node:fs/promises';
-import {readiness,matchesJob,dayKey,countsTowardCap,blocksRetry,MAX_RESUME_BYTES} from './domain.mjs';
+import {readiness,matchesJob,dayKey,countsTowardCap,MAX_RESUME_BYTES} from './domain.mjs';
+import {normalizeJob} from './job-parser.mjs';
+import {evaluateJob} from './job-intelligence.mjs';
+import {jobFingerprint,blockingDuplicate,compareCandidates} from './job-duplicates.mjs';
 
 function stopped(signal){if(signal.aborted)throw new Error('Stopped before submission');}
 const emptyRunStats=()=>({checked:0,attempted:0,submitted:0,unconfirmed:0,needsAnswers:0,ready:0,skipped:0,keywordSkipped:0,failed:0});
@@ -51,6 +54,42 @@ export function createRunner({store,adapter,clock=realClock}) {
       await store.saveQuestions((await store.getQuestions()).filter(question=>question.jobId!==job.id));
     }
   }
+  async function *rankedJobs(config,signal){
+    const discovered=[],ids=new Set(),eligible=[];
+    for await(const job of adapter.findJobs(config.search,{scanLimit:config.scanLimit,signal,intelligence:config.intelligence})){
+      stopped(signal);if(ids.has(String(job.id)))continue;
+      ids.add(String(job.id));discovered.push(job);status.message=`Collecting jobs for ranking: ${discovered.length}`;
+      if(discovered.length>=config.scanLimit)break;
+    }
+    for(let index=0;index<discovered.length;index++){
+      stopped(signal);const source=discovered[index],history=await store.getHistory();
+      if(!config.dryRun&&recount(history,config)>=config.dailyCap){status.state='paused';status.message='Daily application cap reached.';return;}
+      status.runStats.checked++;status.currentJob=structuredClone(source);status.message=`Checking ${source.title} at ${source.company}`;
+      if(blockingDuplicate(source,history)){await recordOutcome(source,{status:'skipped',reason:'Already submitted or uncertain in local history'},null);continue;}
+      let details;
+      try{details=await adapter.inspect(source,{signal});}catch(error){if(!signal.aborted)await recordOutcome(source,{status:'failed',reason:error.message.split('\n')[0]},null);throw error;}
+      stopped(signal);
+      if(typeof details.description!=='string'||!details.description.trim()){
+        const reason='Could not read this job description, so fit and eligibility could not be checked. Open the job in LinkedIn and try again.';
+        await recordOutcome(source,{status:'failed',reason},null);throw new Error(reason);
+      }
+      const job=normalizeJob(source,details,{now:clock.now()});job.discoveryIndex=index;job.assessment=evaluateJob(job,config,{now:clock.now()});job.fingerprint=jobFingerprint(job);
+      const duplicate=blockingDuplicate(job,await store.getHistory());
+      if(duplicate){job.duplicateEvidence={jobId:duplicate.job.id,fingerprint:job.fingerprint};await recordOutcome(job,{status:'skipped',reason:'Equivalent job already submitted or uncertain in local history'},null);continue;}
+      if(job.assessment.decision!=='apply'){await recordOutcome(job,{status:'skipped',reason:job.assessment.reasons.map(r=>r.message+(r.evidence&&typeof r.evidence==='string'?`: ${r.evidence}`:'')).join('; ')},null);continue;}
+      eligible.push(job);
+    }
+    const representatives=new Map();
+    for(const job of eligible.sort(compareCandidates)){
+      stopped(signal);
+      if(job.fingerprint&&representatives.has(job.fingerprint)){
+        job.duplicateEvidence={jobId:representatives.get(job.fingerprint).id,fingerprint:job.fingerprint};
+        await recordOutcome(job,{status:'skipped',reason:'Equivalent posting already selected in this run'},null);continue;
+      }
+      if(job.fingerprint)representatives.set(job.fingerprint,job);
+    }
+    for(const job of eligible)if(!job.duplicateEvidence){stopped(signal);yield job;}
+  }
   async function run(config,answers,signal){
     let scanned=0;
     try{
@@ -58,15 +97,18 @@ export function createRunner({store,adapter,clock=realClock}) {
       if(!await adapter.isSignedIn()){
         status.state='paused';status.message='Open LinkedIn and sign in, then start again.';return;
       }
-      for await(const job of adapter.findJobs(config.search,{scanLimit:config.scanLimit,signal})){
+      const intelligent=config.intelligence?.enabled;
+      const candidates=intelligent?rankedJobs(config,signal):adapter.findJobs(config.search,{scanLimit:config.scanLimit,signal});
+      for await(const job of candidates){
         if(signal.aborted)break;
         if(scanned>=config.scanLimit)break;
         const history=await store.getHistory();
         if(!config.dryRun && recount(history,config)>=config.dailyCap){status.state='paused';status.message='Daily application cap reached.';break;}
-        status.runStats.checked=++scanned;status.currentJob=structuredClone(job);status.message=`Checking ${job.title} at ${job.company}`;
-        if(history.some(record=>record.job.id===job.id && blocksRetry(record))){
+        if(!intelligent)status.runStats.checked=++scanned;status.currentJob=structuredClone(job);status.message=`${intelligent?'Applying to':'Checking'} ${job.title} at ${job.company}`;
+        if(blockingDuplicate(job,history)){
           await recordOutcome(job,{status:'skipped',reason:'Already submitted or uncertain in local history'},null);continue;
         }
+        if(!intelligent){
         let details;
         try{details=await adapter.inspect(job,{signal});}
         catch(error){
@@ -85,11 +127,13 @@ export function createRunner({store,adapter,clock=realClock}) {
           const reason=details.alreadyApplied?'LinkedIn shows this job as already applied':!details.easyApply?'No LinkedIn Easy Apply':'Description does not match your keyword filters';
           await recordOutcome(job,{status:'skipped',reason,skipKind:!details.alreadyApplied && details.easyApply?'keyword':null},null);continue;
         }
+        }
         let pending=null,result;
         const beforeSubmit=async()=>{
           stopped(signal);
           if(pending)throw new Error('Submission was already reserved');
           let current=await store.getHistory();
+          if(blockingDuplicate(job,current))throw new Error('This job or an equivalent posting already has a submitted or uncertain attempt');
           if(recount(current,config)>=config.dailyCap)throw new Error('Daily application cap reached');
           const times=current.map(record=>Date.parse(record.attemptedAt)).filter(Number.isFinite);
           if(times.length){
@@ -98,6 +142,7 @@ export function createRunner({store,adapter,clock=realClock}) {
           }
           stopped(signal);
           current=await store.getHistory();
+          if(blockingDuplicate(job,current))throw new Error('This job or an equivalent posting already has a submitted or uncertain attempt');
           if(recount(current,config)>=config.dailyCap)throw new Error('Daily application cap reached');
           pending=await store.createRecord(job,'submission_pending');
           status.runStats.attempted++;

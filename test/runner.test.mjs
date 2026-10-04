@@ -8,7 +8,7 @@ import {defaultConfig} from '../src/domain.mjs';
 import {createRunner} from '../src/runner.mjs';
 
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return{promise,resolve};};
-async function setup(t,{count=3,outcome='submitted',outcomes={},config={},beforeGuard,afterGuard,throwAfterGuard=false,descriptions={}}={}){
+async function setup(t,{count=3,outcome='submitted',outcomes={},config={},beforeGuard,afterGuard,throwAfterGuard=false,descriptions={},details={}}={}){
   const dir=await mkdtemp(join(tmpdir(),'job-applier-runner-'));t.after(()=>rm(dir,{recursive:true,force:true}));
   const resumePath=join(dir,'resume.pdf');await writeFile(resumePath,'%PDF-1.4');
   const store=await createStore(dir);
@@ -17,12 +17,13 @@ async function setup(t,{count=3,outcome='submitted',outcomes={},config={},before
   let time=Date.parse('2026-10-01T15:00:00Z');
   const clock={now:()=>new Date(time),sleep:async(ms,signal)=>{if(signal?.aborted)throw new Error('Stopped');time+=ms;}};
   const jobs=Array.from({length:count},(_,i)=>({id:String(1001+i),url:`https://www.linkedin.com/jobs/view/${1001+i}/`,title:'Engineer',company:'Example'}));
-  const observed={applications:[],opens:0};
+  const observed={applications:[],opens:0,events:[]};
   const adapter={
     openBrowser:async()=>{observed.opens++;},isSignedIn:async()=>true,close:async()=>{},
-    async *findJobs(){yield*jobs;},
-    inspect:async job=>({description:Object.hasOwn(descriptions,job.id)?descriptions[job.id]:'Remote Python engineer',easyApply:true,alreadyApplied:false}),
+    async *findJobs(_search,options){observed.discoveryOptions=options;for(const job of jobs){observed.events.push(`discover:${job.id}`);yield job;}},
+    inspect:async job=>{observed.events.push(`inspect:${job.id}`);return {description:Object.hasOwn(descriptions,job.id)?descriptions[job.id]:'Remote Python engineer',easyApply:true,alreadyApplied:false,...details[job.id]};},
     async apply(job,options){
+      observed.events.push(`apply:${job.id}`);
       observed.applications.push({job:structuredClone(job),profile:structuredClone(options.profile),answers:structuredClone(options.answers),resumePath:options.resumePath});
       const result=outcomes[job.id]||outcome;
       if(result==='paused')return {status:'paused',reason:'LinkedIn daily application limit'};
@@ -37,8 +38,74 @@ async function setup(t,{count=3,outcome='submitted',outcomes={},config={},before
   };
   const runner=createRunner({store,adapter,clock});
   t.after(async()=>{await runner.stop();await store.close();});
-  return {dir,store,runner,observed,jobs,adapter};
+  return {dir,store,runner,observed,jobs,adapter,clock};
 }
+
+const matchingConfig={intelligence:{enabled:true,minimumFitScore:70,candidate:{skills:['Python']},roleFamilies:['swe']}};
+test('runner collects the bounded scan before inspection and applies the highest fit first',async t=>{
+  const {runner,observed,jobs,store}=await setup(t,{count:2,config:matchingConfig,descriptions:{1001:'Required: Python and Git',1002:'Required: Python'}});
+  jobs.forEach(j=>j.title='Software Engineer Intern');await runner.start();await runner.waitForIdle();
+  assert.deepEqual(observed.events,['discover:1001','discover:1002','inspect:1001','inspect:1002','apply:1002','apply:1001']);
+  assert.equal(observed.discoveryOptions.intelligence.enabled,true);
+  const history=await store.getHistory();assert.equal(history[0].job.assessment.score,83);assert.equal(history[1].job.assessment.score,70);
+  assert.equal(runner.getStatus().runStats.checked,2);
+});
+test('runner retains legacy streaming order when intelligent matching is disabled',async t=>{
+  const {runner,observed}=await setup(t,{count:2});await runner.start();await runner.waitForIdle();
+  assert.deepEqual(observed.events,['discover:1001','inspect:1001','apply:1001','discover:1002','inspect:1002','apply:1002']);
+});
+test('runner never applies queued jobs after an unreadable intelligent inspection',async t=>{
+  const {runner,observed,jobs,store}=await setup(t,{count:2,config:matchingConfig,descriptions:{1001:'Required: Python',1002:''}});
+  jobs.forEach(j=>j.title='Software Engineer Intern');await runner.start();await runner.waitForIdle();
+  assert.equal(observed.applications.length,0);assert.equal(runner.getStatus().state,'failed');
+  assert.equal((await store.getHistory()).filter(r=>r.attemptedAt).length,0);
+});
+test('runner suppresses strong reposts but allows unattempted failed histories to retry',async t=>{
+  const {runner,observed,jobs,store}=await setup(t,{count:2,config:matchingConfig,descriptions:{1001:'Required: Python',1002:'Required: Python'},details:{1001:{location:'Houston, TX, USA'},1002:{location:'Houston, TX, USA'}}});
+  jobs.forEach(j=>j.title='Software Engineer Intern');await store.createRecord(jobs[0],'failed');
+  await runner.start();await runner.waitForIdle();assert.equal(observed.applications.length,1);
+  assert.equal((await store.getHistory()).filter(r=>r.status==='skipped').length,1);
+});
+test('runner records fit review without attempting unresolved eligibility or a senior role',async t=>{
+  const {runner,observed,jobs,store}=await setup(t,{count:2,config:matchingConfig,descriptions:{1001:'Required: Python\nMust possess active Secret clearance',1002:'Required: Python'}});
+  jobs[0].title='Software Engineer Intern';jobs[1].title='Senior Software Engineer';await runner.start();await runner.waitForIdle();
+  assert.equal(observed.applications.length,0);const history=await store.getHistory();
+  assert.deepEqual(history.map(r=>r.status),['skipped','skipped']);assert.equal(history[0].job.assessment.decision,'review');assert.equal(history[1].job.assessment.score,null);
+});
+test('runner rechecks a same-ID attempt inserted during pacing before making a second reservation',async t=>{
+  const {runner,store,clock}=await setup(t,{count:1});
+  const old=await store.createRecord({id:'9999',title:'Another job',company:'Example'},'submission_pending');await store.updateRecord(old.id,{status:'submitted',attemptedAt:'2026-10-01T15:00:00Z'});
+  const originalSleep=clock.sleep;clock.sleep=async(ms,signal)=>{const record=await store.createRecord({id:'1001',title:'Engineer',company:'Example'},'submission_pending');await store.updateRecord(record.id,{status:'submitted',attemptedAt:'2026-10-01T15:00:01Z'});await originalSleep(ms,signal);};
+  await runner.start();await runner.waitForIdle();
+  assert.equal((await store.getHistory()).filter(r=>r.job.id==='1001'&&r.attemptedAt).length,1);
+  assert.equal(runner.getStatus().runStats.attempted,0);
+});
+test('runner Stop during intelligent collection or inspection produces no application attempt',async t=>{
+  for(const stage of ['collection','inspection']){
+    const {runner,adapter,observed,jobs,store}=await setup(t,{count:2,config:matchingConfig});jobs.forEach(j=>j.title='Software Engineer Intern');
+    const entered=deferred();
+    const wait=signal=>new Promise(resolve=>signal.addEventListener('abort',resolve,{once:true}));
+    if(stage==='collection')adapter.findJobs=async function*(_search,{signal}){yield jobs[0];entered.resolve();await wait(signal);throw new Error('Stopped');};
+    else adapter.inspect=async(_job,{signal})=>{entered.resolve();await wait(signal);throw new Error('Stopped');};
+    await runner.start();await entered.promise;await runner.stop();
+    assert.equal(observed.applications.length,0);assert.equal((await store.getHistory()).filter(r=>r.attemptedAt).length,0);assert.equal(runner.getStatus().state,'idle');
+  }
+});
+test('runner blocks a cross-ID fingerprint attempt inserted during intelligent pacing',async t=>{
+  const {runner,store,clock,jobs}=await setup(t,{count:1,config:matchingConfig,descriptions:{1001:'Required: Python'},details:{1001:{location:'Houston, TX, USA'}}});jobs[0].title='Software Engineer Intern';
+  const previous=await store.createRecord({id:'9999',title:'Another job',company:'Example'},'submission_pending');await store.updateRecord(previous.id,{status:'submitted',attemptedAt:'2026-10-01T15:00:00Z'});
+  let selected;const originalSleep=clock.sleep;
+  // Same-job metadata is supplied by the real ranked runner before apply.
+  const originalCreate=store.createRecord; // retain all real store side effects
+  const originalGet=store.getHistory;
+  clock.sleep=async(ms,signal)=>{
+    const {normalizeJob}=await import('../src/job-parser.mjs');const {jobFingerprint}=await import('../src/job-duplicates.mjs');
+    selected=normalizeJob({...jobs[0],id:'1009'},{description:'Required: Python',easyApply:true,location:'Houston, TX, USA'},{now:clock.now()});selected.fingerprint=jobFingerprint(selected);
+    const record=await originalCreate(selected,'submission_pending');await store.updateRecord(record.id,{status:'submitted'});await originalSleep(ms,signal);
+  };
+  await runner.start();await runner.waitForIdle();assert.equal(runner.getStatus().runStats.attempted,0);
+  assert.equal((await originalGet()).filter(r=>r.job.id==='1001'&&r.attemptedAt).length,0);
+});
 
 test('runner enforces scan bounds and description filters even on an unbounded adapter',async t=>{
   const {runner,store}=await setup(t,{config:{scanLimit:2,search:{titles:['Engineer'],location:'Chicago',workplace:'any',includeKeywords:['Python'],excludeKeywords:[]}},descriptions:{1001:'Rust engineer'}});

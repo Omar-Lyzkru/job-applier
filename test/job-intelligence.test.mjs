@@ -5,6 +5,7 @@ import {normalizeJob} from '../src/job-parser.mjs';
 import {defaultIntelligenceConfig,validateIntelligence} from '../src/intelligence-config.mjs';
 import {buildSearchQueries} from '../src/search-profiles.mjs';
 import {evaluateJob} from '../src/job-intelligence.mjs';
+import {jobFingerprint,blockingDuplicate,compareCandidates} from '../src/job-duplicates.mjs';
 import {validateConfig,readiness} from '../src/domain.mjs';
 
 const now=new Date('2026-10-04T12:00:00Z');
@@ -125,6 +126,21 @@ test('editable senior family titles do not silently turn an explicit senior sear
 test('a negative sponsorship condition still requires eligibility review',()=>{
   const job=parse('Requirements:\nWe do not provide visa sponsorship');
   assert.equal(evaluateJob(job,matching(),{now}).reasons.some(r=>r.code==='eligibility_review'),true);
+});
+
+test('strong repost fingerprints require equivalent titles, known company/location and identical descriptions',()=>{
+  const original=parse('Required: Python',{location:'Houston, TX, USA'}),repost={...original,id:'1002'};
+  assert.equal(jobFingerprint(original),jobFingerprint(repost));
+  for(const changed of [{...repost,location:parse('Required: Python',{location:'Dallas, TX, USA'}).location},{...repost,descriptionHash:parse('Required: Git').descriptionHash},{...repost,title:'Senior Software Engineer'},{...repost,company:'Company on LinkedIn'},{...repost,location:parse('Required: Python').location}])assert.notEqual(jobFingerprint(changed),jobFingerprint(original));
+  assert.equal(jobFingerprint({...original,title:'Back End Developer Intern'}),jobFingerprint({...original,title:'Backend Developer Intern'}));
+  const history=[{job:original,status:'failed',attemptedAt:'2026-10-04T12:00:00Z'}];
+  assert.equal(blockingDuplicate(repost,history),history[0]);
+  assert.equal(blockingDuplicate(repost,[{...history[0],attemptedAt:null}]),null);
+  assert.equal(blockingDuplicate(repost,[{job:original,status:'needs_answer',attemptedAt:null}]),null);
+});
+test('candidate ties prefer known freshness then stable discovery order without fabricating unknown dates',()=>{
+  const candidates=[{id:'a',assessment:{score:85},postedAt:null,discoveryIndex:0},{id:'b',assessment:{score:70},postedAt:'2026-10-04',discoveryIndex:1},{id:'c',assessment:{score:85},postedAt:'2026-10-03',discoveryIndex:2},{id:'d',assessment:{score:85},postedAt:'2026-10-03',discoveryIndex:3}];
+  assert.deepEqual(candidates.sort(compareCandidates).map(j=>j.id),['c','d','a','b']);
 });
 
 test('posting skill buckets retain evidence and required skills win over preferred duplicates',()=>{
