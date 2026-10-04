@@ -1,6 +1,52 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {defaultConfig, validateConfig, readiness, normalizeQuestion, resolveAnswer, matchesJob, dayKey, countsTowardCap, blocksRetry} from '../src/domain.mjs';
+import * as answerMemory from '../src/answer-memory.mjs';
+const describeQuestion=field=>answerMemory.describeQuestion(field);
+
+test('finite skill-year templates reuse explicit same-skill values with preserved source and scope',()=>{
+  const total=['Years of Python experience','Years of experience with Python','How many years of Python experience do you have?','How many years of experience do you have with Python?','How many years of experience do you have in Python?','Total years of Python experience','Total years of experience with Python'];
+  for(const label of total){const result=resolveAnswer({label,type:'number'},{},{'years of python experience':0});assert.equal(result.kind,'fill',label);assert.equal(result.value,'0');assert.equal(result.sourceQuestion,'years of python experience');}
+  const professional=['Years of professional Python experience','Years of professional experience with Python','How many years of professional Python experience do you have?','How many years of professional experience do you have with Python?','How many years of professional experience do you have in Python?'];
+  for(const label of professional){assert.equal(resolveAnswer({label,type:'text'},{},{'years of professional python experience':1.5}).value,'1.5',label);assert.equal(resolveAnswer({label,type:'text'},{},{'years of python experience':2}).kind,'missing');}
+  for(const [skill,source] of [['JS','JavaScript'],['ECMAScript','JavaScript'],['React.js','React'],['ReactJS','React.js'],['nodejs','Node.js'],['Postgres','PostgreSQL'],['Rust programming','Rust'],['Java','Java'],['TypeScript','TypeScript'],['SQL','SQL'],['Git','Git']]){
+    const result=resolveAnswer({label:`How many years of experience do you have with ${skill}?`,type:'number'},{},{[normalizeQuestion(`Years of ${source} experience`)]:2});assert.equal(result.value,'2',skill);
+  }
+  assert.equal(describeQuestion({label:'Years of professional Python experience',type:'number'}).intent,'skill-years:professional:python');
+});
+
+test('recognized years require scalar nonnegative numbers and preserve exact choice meanings',()=>{
+  for(const answer of [false,true,'No experience','two',-1,Infinity])assert.equal(resolveAnswer({label:'Years of Python experience',type:'text'},{},{'years of python experience':answer}).kind,'missing');
+  const select={label:'Years of Python experience',type:'select',options:[{label:'0–1 years',value:'a'},{label:'2–3 years',value:'b'}]};
+  assert.equal(resolveAnswer(select,{},{'years of experience with python':'2–3 years'}).value,'b');
+  assert.equal(resolveAnswer({...select,type:'number',options:[]},{},{'years of experience with python':'2–3 years'}).kind,'missing');
+  assert.equal(resolveAnswer({label:'Years of Python experience',type:'number'},{},{'years of python experience':0,'years of experience with python':3}).value,'0');
+  assert.equal(resolveAnswer({label:'How many years of Python experience do you have?',type:'number'},{},{'years of python experience':0,'years of experience with python':3}).kind,'missing');
+});
+
+test('skill qualifiers, separate languages and ambiguous C-family keys never borrow another answer',()=>{
+  for(const label of ['Years of professional JavaScript experience','Years of Java experience','Years of paid Python experience','Years of recent Python experience','Years of Python and JavaScript experience','Years of continuous Python experience','Years of full-time Python experience','Years of production Python experience','Years of commercial Python experience'])assert.equal(resolveAnswer({label,type:'number'},{},{'years of python experience':2}).kind,'missing',label);
+  for(const label of ['Years of C experience','Years of C++ experience','Years of C# experience']){
+    const field={label,type:'number'},result=resolveAnswer(field,{},{'years of c experience':2});assert.equal(result.kind,'missing',label);assert.equal(result.manual,true);assert.equal(describeQuestion(field).reviewPolicy,'manual');
+  }
+  assert.notDeepEqual(describeQuestion({label:'Years of C++ experience',type:'number'}).scope,describeQuestion({label:'Years of C# experience',type:'number'}).scope);
+});
+
+test('current-student aliases preserve explicit false and exclude narrower or negated eligibility',()=>{
+  const field={label:'Are you presently a student?',type:'radio',options:[{label:'Yes',value:'on'},{label:'No',value:'on'}]};
+  assert.equal(resolveAnswer(field,{student:true},{}).kind,'missing');
+  assert.equal(resolveAnswer(field,{},{'are you currently a student':false,'are you a current student':'No'}).optionLabel,'No');
+  for(const label of ['Are you a full-time student?','Are you not currently a student?','Are you an undergraduate student?','Are you a college student?','Will you be a student next year?'])assert.equal(resolveAnswer({...field,label},{},{'are you currently a student':true}).kind,'missing',label);
+  for(const [label,key,value] of [['Name of your current university','school','Example University'],['Current degree','degree type',"Bachelor's Degree"],['Current field of study','major','Computer Science']])assert.equal(resolveAnswer({label,type:'text'},{},{[key]:value}).value,value);
+});
+
+test('sensitive saved questions cannot appear as generic suggestions in either direction',()=>{
+  for(const sensitive of ['salary','pay','certification','clearance','legally','visa','citizenship','consent','sms','identity']){
+    const result=resolveAnswer({label:'Describe your preferred schedule',type:'text'},{},{[`describe your preferred schedule ${sensitive}`]:'Sensitive answer'});
+    assert.equal(result.suggestions?.length||0,0,sensitive);
+    assert.equal(resolveAnswer({label:`Describe your preferred schedule ${sensitive}`,type:'text'},{},{'describe your preferred schedule':'Ordinary answer'}).suggestions?.length||0,0,sensitive);
+  }
+});
 
 test('incomplete setup can be saved but cannot run', () => {
   const config = validateConfig({});

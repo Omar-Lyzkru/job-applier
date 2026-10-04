@@ -19,6 +19,16 @@ async function setup(t){
   return {dir,store,app,bootstrap,send,upload,commands};
 }
 
+test('current-student common question stays blank until an explicit answer is saved',async t=>{
+  const {app,send}=await setup(t);
+  const read=async()=>await (await fetch(app.url+'/api/bootstrap')).json();
+  let student=(await read()).answerMemory.commonQuestions.find(q=>q.key==='are you currently a student');
+  assert.equal(student.status,'unanswered');assert.equal(student.answer,undefined);
+  await send('/api/config',{intelligence:{candidate:{student:true}}});
+  assert.equal((await read()).answerMemory.commonQuestions.find(q=>q.key==='are you currently a student').status,'unanswered');
+  await send('/api/answers',{'are you currently a student':false});student=(await read()).answerMemory.commonQuestions.find(q=>q.key==='are you currently a student');assert.equal(student.answer,false);
+});
+
 test('API retains matching settings on save and rejects oversized expanded queries',async t=>{
   const {app,send}=await setup(t);
   assert.equal((await send('/api/config',{intelligence:{enabled:true,minimumFitScore:60,candidate:{student:false,professionalYears:0,skills:['JS']},roleFamilies:['web'],regions:[{name:'United States',priority:8,workplace:'remote'}]}})).status,200);
