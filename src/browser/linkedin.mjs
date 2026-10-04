@@ -1,5 +1,6 @@
 import {createBrowserSession} from './session.mjs';
 import {fillApplicationFields,validationErrors,checkStopped} from './forms.mjs';
+import {buildSearchQueries} from '../search-profiles.mjs';
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const experienceLabels={INTERNSHIP:'Internship',ENTRY_LEVEL:'Entry level',ASSOCIATE:'Associate',MID_SENIOR_LEVEL:'Mid-Senior level',DIRECTOR:'Director',EXECUTIVE:'Executive'};
@@ -193,10 +194,63 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
     checkStopped(signal);
     return sawReminder&&!continued?'LinkedIn\'s safety reminder did not finish loading. Review it in the browser before continuing.':'LinkedIn\'s application form did not finish loading. Open the job in the browser and try again.';
   }
+  async function *fairJobs(page,search,{scanLimit,signal,intelligence}){
+    const states=buildSearchQueries(search,intelligence).map(query=>({query,start:0,buffer:[],seen:new Set(),exhausted:false})),seen=new Set();
+    let experienceValues=null;
+    while(seen.size<scanLimit){
+      const active=states.filter(state=>state.buffer.length||!state.exhausted);if(!active.length)return;
+      for(let index=0;index<active.length&&seen.size<scanLimit;index++){
+        checkStopped(signal);const state=active[index],quota=Math.ceil((scanLimit-seen.size)/(active.length-index));
+        // A round fetches at most one page per query. Surplus cards stay buffered.
+        if(!state.buffer.length&&!state.exhausted){
+          if(state.start>=1000){state.exhausted=true;continue;}
+          const url=new URL(`${baseUrl}/jobs/search/`),q=state.query;
+          for(const [key,value] of Object.entries({keywords:q.title,location:q.location,f_AL:'true',start:String(state.start)}))url.searchParams.set(key,value);
+          const workplace={onsite:'1',remote:'2',hybrid:'3'}[q.workplace];if(workplace)url.searchParams.set('f_WT',workplace);
+          if(experienceValues)url.searchParams.set('f_E',experienceValues);
+          await page.goto(url.href,{waitUntil:'domcontentloaded'});checkStopped(signal);
+          let pause=await interruption(page);if(pause)throw new Error(pause);
+          if(search.experienceLevels?.length&&!experienceValues){
+            experienceValues=await experienceFilterValues(page,search.experienceLevels,signal);checkStopped(signal);url.searchParams.set('f_E',experienceValues);
+            await page.goto(url.href,{waitUntil:'domcontentloaded'});checkStopped(signal);pause=await interruption(page);if(pause)throw new Error(pause);
+          }
+          if(search.experienceLevels?.length)await experienceFilterValues(page,search.experienceLevels,signal,{confirm:true});
+          await page.locator('a[href*="/jobs/view/"]').first().waitFor({state:'attached',timeout:action}).catch(()=>{});checkStopped(signal);
+          let fresh=0;
+          for(let scroll=0;scroll<4;scroll++){
+            const cards=await page.locator('a[href*="/jobs/view/"]').evaluateAll(links=>links.map(link=>({href:link.href,title:(link.getAttribute('aria-label')||link.textContent||'').trim(),company:link.closest('li')?.querySelector('.artdeco-entity-lockup__subtitle,.job-card-container__primary-description')?.textContent.trim()||''})));
+            for(const card of cards){
+              const id=card.href.match(/\/jobs\/view\/(?:[^/?]*-)?(\d+)(?:\/|\?|$)/)?.[1];if(!id||state.seen.has(id))continue;
+              state.seen.add(id);fresh++;state.buffer.push({id,url:`https://www.linkedin.com/jobs/view/${id}/`,title:card.title||'LinkedIn job',company:card.company||'Company on LinkedIn'});
+            }
+            checkStopped(signal);const list=page.locator('.jobs-search-results-list,.scaffold-layout__list').first();if(!await list.count())break;
+            await list.evaluate(el=>el.scrollBy(0,600));await sleep(200);checkStopped(signal);
+          }
+          state.start+=25;if(!fresh)state.exhausted=true;
+        }
+        let used=0;
+        while(state.buffer.length&&used<quota&&seen.size<scanLimit){
+          checkStopped(signal);const job=state.buffer.shift();if(seen.has(job.id))continue;seen.add(job.id);used++;yield job;
+        }
+      }
+    }
+  }
+  async function postingMetadata(page){
+    return page.evaluate(()=>{
+      const visible=element=>element.getClientRects().length>0&&!['hidden','collapse'].includes(getComputedStyle(element).visibility)&&!element.closest('aside,nav,[aria-hidden="true"],[hidden]');
+      const header=Array.from(document.querySelectorAll('[data-job-header],.job-details-jobs-unified-top-card__container,.jobs-unified-top-card')).find(visible);
+      const empty={location:null,workplace:null,postedAt:null,postedAge:null,evidence:[]};if(!header)return empty;
+      const first=selector=>Array.from(header.querySelectorAll(selector)).filter(visible).find(element=>element.textContent.trim());
+      const location=first('[data-job-location],.job-details-jobs-unified-top-card__primary-description-container .tvm__text,.jobs-unified-top-card__bullet'),workplace=first('[data-job-workplace],.job-details-jobs-unified-top-card__job-insight'),time=first('time[datetime]'),age=first('[data-job-posted-age],.job-details-jobs-unified-top-card__tertiary-description-container');
+      const mode=workplace?.textContent.trim().match(/\b(remote|hybrid|on-site|onsite)\b/i)?.[1]?.toLowerCase().replace('on-site','onsite')||null;
+      return {location:location?.textContent.trim()||null,workplace:mode,postedAt:time?.getAttribute('datetime')||null,postedAge:age?.textContent.trim()||time?.textContent.trim()||null,evidence:[location,workplace,time,age].filter(Boolean).map(element=>({kind:'posting_header',text:element.textContent.trim()}))};
+    });
+  }
   const adapter={
     async openBrowser(){const page=await session.open();if(!headless)await page.bringToFront();return page;},
     async isSignedIn(){return signedIn(await session.open());},
-    async *findJobs(search,{scanLimit=100,signal}={}){
+    async *findJobs(search,{scanLimit=100,signal,intelligence}={}){
+      if(intelligence?.enabled){checkStopped(signal);yield* fairJobs(await session.open(),search,{scanLimit,signal,intelligence});return;}
       const page=await session.open(),seen=new Set();
       let experienceValues=null;
       for(const title of search.titles){
@@ -243,7 +297,7 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
       const page=await navigateJob(job);
       const {description,title,company}=await jobContent(page,signal);
       job.title=title||job.title;job.company=company||job.company;
-      return {description,alreadyApplied:await page.getByText(/^(Application submitted|Applied)$/i).first().isVisible().catch(()=>false),easyApply:await page.getByRole('button',{name:/Easy Apply/i}).first().isVisible().catch(()=>false)};
+      return {description,...await postingMetadata(page),alreadyApplied:await page.getByText(/^(Application submitted|Applied)$/i).first().isVisible().catch(()=>false),easyApply:await page.getByRole('button',{name:/Easy Apply/i}).first().isVisible().catch(()=>false)};
     },
     async apply(job,{profile,answers,resumePath,dryRun=false,signal,beforeSubmit}){
       let page,submitted=false;

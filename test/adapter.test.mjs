@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {startFixture} from './fixtures/linkedin.mjs';
 import {createLinkedInAdapter} from '../src/browser/linkedin.mjs';
+import {validateIntelligence} from '../src/intelligence-config.mjs';
 
 const job={id:'1001',url:'https://www.linkedin.com/jobs/view/1001/',title:'Software Engineer',company:'Example'};
 const profile={firstName:'Test',lastName:'Applicant',email:'test@example.com',phone:'5551234567'};
@@ -17,6 +18,69 @@ async function setup(t,scenario='success',timeouts={}) {
   t.after(async()=>{await adapter.close();await fixture.close();await rm(dir,{recursive:true,force:true});});
   return {adapter,fixture,resumePath,options:{profile,answers,resumePath,dryRun:false,beforeSubmit:async()=>fixture.state.events.push('guard')}};
 }
+
+const fairSearch={titles:['A','B','C'],location:'Houston, TX, USA',workplace:'any',experienceLevels:[]};
+const intelligent=validateIntelligence({enabled:true});
+test('browser: enabled discovery shares a small scan fairly between queries without opening jobs',async t=>{
+  const {adapter,fixture}=await setup(t);
+  fixture.state.searchPageFor=params=>params.start==='0'?Array.from({length:6},(_,i)=>({id:String(1000+'ABC'.indexOf(params.keywords)*100+i),title:params.keywords,company:'Example'})):[];
+  const jobs=[];for await(const found of adapter.findJobs(fairSearch,{scanLimit:5,intelligence:intelligent}))jobs.push(found);
+  assert.deepEqual(jobs.map(j=>j.title),['A','A','B','B','C']);
+  assert.equal(jobs.length,5);assert.equal(new Set(jobs.map(j=>j.id)).size,5);
+  assert.deepEqual(fixture.state.searches.map(q=>[q.keywords,q.start]),[['A','0'],['B','0'],['C','0']]);
+  assert.equal(fixture.state.searches.every(q=>q.f_AL==='true'),true);assert.deepEqual(fixture.state.views,[]);
+});
+test('browser: enabled discovery consumes buffered cards before advancing a query page',async t=>{
+  const {adapter,fixture}=await setup(t);
+  fixture.state.searchPageFor=params=>{
+    const index='ABC'.indexOf(params.keywords),page=Number(params.start);
+    if(page>25)return [];
+    const count=params.keywords==='A'&&page===0?6:1;
+    return Array.from({length:count},(_,i)=>({id:String(1000+index*100+page+i),title:params.keywords,company:'Example'}));
+  };
+  const jobs=[];for await(const found of adapter.findJobs(fairSearch,{scanLimit:10,intelligence:intelligent}))jobs.push(found);
+  assert.deepEqual(jobs.map(j=>j.title),['A','A','A','A','B','C','A','A','B','C']);
+  assert.deepEqual(fixture.state.searches.map(q=>[q.keywords,q.start]),[['A','0'],['B','0'],['C','0'],['B','25'],['C','25']]);
+});
+test('browser: query duplicates and slugged IDs consume one global slot with bounded cancellation',async t=>{
+  const {adapter,fixture}=await setup(t);
+  fixture.state.searchPageFor=params=>params.start==='0'?[{id:'1001',slug:'intern-1001',title:'Shared',company:'Example'},{id:params.keywords==='B'?'1002':'1001',title:'Second',company:'Example'}]:[];
+  const jobs=[];for await(const found of adapter.findJobs(fairSearch,{scanLimit:2,intelligence:intelligent}))jobs.push(found);
+  assert.deepEqual(jobs.map(j=>j.id),['1001','1002']);
+  const controller=new AbortController();controller.abort();
+  const before=fixture.state.searches.length;
+  await assert.rejects(async()=>{for await(const ignored of adapter.findJobs(fairSearch,{signal:controller.signal,intelligence:intelligent})){}},/Stopped/);
+  assert.equal(fixture.state.searches.length,before);
+});
+test('browser: optional posting facts come only from visible primary header evidence',async t=>{
+  const {adapter,fixture}=await setup(t);
+  fixture.state.postingFor=()=>({header:'<span data-job-location>Houston, Texas, United States</span><span data-job-workplace>Hybrid</span><time datetime="2026-10-02T12:00:00Z">2 days ago</time><span data-job-location hidden>London, UK</span>',related:'<aside><span data-job-location>Dallas, TX, USA</span><time datetime="2026-10-04">Today</time></aside>'});
+  const result=await adapter.inspect({...job});
+  assert.equal(result.location,'Houston, Texas, United States');assert.equal(result.workplace,'hybrid');assert.equal(result.postedAt,'2026-10-02T12:00:00Z');
+  assert.doesNotMatch(JSON.stringify(result.evidence),/Dallas|London/);
+});
+test('browser: missing primary posting metadata remains unknown without waiting for an action timeout',async t=>{
+  const {adapter,fixture}=await setup(t,'success',{action:1800});
+  fixture.state.postingFor=()=>({related:'<aside><span data-job-location>Dallas, TX, USA</span><time datetime="2026-10-04">Today</time></aside>'});
+  await adapter.openBrowser();const start=performance.now();const result=await adapter.inspect({...job});
+  assert.equal(result.location,null);assert.equal(result.postedAt,null);assert.equal(result.workplace,null);
+  assert.ok(performance.now()-start<1000);
+});
+test('browser: intelligent discovery preserves selected region workplace and confirmed experience filters',async t=>{
+  const {adapter,fixture}=await setup(t);
+  const config=validateIntelligence({enabled:true,regions:[{name:'United States',priority:7,workplace:'remote'}]});
+  const found=[];for await(const candidate of adapter.findJobs({...fairSearch,experienceLevels:['INTERNSHIP']},{scanLimit:1,intelligence:config}))found.push(candidate);
+  assert.equal(found.length,1);
+  const last=fixture.state.searches.at(-1);assert.equal(last.location,'United States');assert.equal(last.f_WT,'2');assert.equal(last.f_E,'1');assert.equal(last.f_AL,'true');
+  assert.equal(new Set(fixture.state.searches.map(q=>q.keywords)).size,1);
+});
+test('browser: Stop during an intelligent search navigation yields no later queries or applications',async t=>{
+  const {adapter,fixture}=await setup(t),entered=Promise.withResolvers(),gate=Promise.withResolvers(),controller=new AbortController();
+  fixture.state.beforeSearch=async()=>{entered.resolve();await gate.promise;};
+  const result=(async()=>{const found=[];for await(const candidate of adapter.findJobs(fairSearch,{scanLimit:10,signal:controller.signal,intelligence:intelligent}))found.push(candidate);return found;})();
+  const rejected=assert.rejects(result,/Stopped/);
+  try{await entered.promise;controller.abort();gate.resolve();await rejected;assert.equal(fixture.state.searches.length,1);assert.deepEqual(fixture.state.views,[]);assert.deepEqual(fixture.state.events,[]);}finally{gate.resolve();await result.catch(()=>{});}
+});
 
 test('browser: description reads modern About the job section without a title heading',async t=>{
   const {adapter,fixture}=await setup(t,'description-modern',{action:600});

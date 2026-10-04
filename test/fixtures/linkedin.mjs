@@ -1,7 +1,8 @@
 import {createServer} from 'node:http';
 
 export async function startFixture(scenario='success') {
-  const state={events:[],submissions:[],reviews:[],searches:[],fields:null};
+  const state={events:[],submissions:[],reviews:[],searches:[],views:[],fields:null};
+  const escapeHtml=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
   const server=createServer(async(req,res)=> {
     const url=new URL(req.url,'http://localhost');
     if (url.pathname==='/events') {
@@ -17,9 +18,12 @@ export async function startFixture(scenario='success') {
     if(res.destroyed)return;
     if (scenario==='signed-out') {res.end('<h1>Sign in</h1><label>Email<input id="username"></label><button>Sign in</button>'); return;}
     if (url.pathname.startsWith('/jobs/search')) {
-      state.searches.push(Object.fromEntries(url.searchParams));
+      const params=Object.fromEntries(url.searchParams);state.searches.push(params);
+      if(state.beforeSearch)await state.beforeSearch(params,req,res);
+      if(res.destroyed)return;
       const start=Number(url.searchParams.get('start')||0);
       const ids=start===0?[1001,1002]:start===25?[1003,1004]:[];
+      const cards=state.searchPageFor?state.searchPageFor(params):ids.map(id=>({id,title:`Software Engineer ${id}`,company:'Example'}));
       const levels=['Internship','Entry level','Associate','Mid-Senior level','Director','Executive'];
       const selected=new Set(scenario==='experience-ignored'||(scenario==='experience-ignored-later'&&start>0)?[]:(url.searchParams.get('f_E')||'').split(','));
       if(scenario==='experience-widened' && url.searchParams.has('f_E'))selected.add('4');
@@ -29,10 +33,12 @@ export async function startFixture(scenario='success') {
         return `<label><input type="checkbox" name="f_E" value="${value}"${selected.has(value)?' checked':''}>${label}${scenario==='experience-popup'?' (123)':''}</label>`;
       }).join('')}</fieldset>`;
       const experience=scenario==='experience-unavailable'?'':scenario==='experience-popup'?`<button id="experience">Experience level</button><div id="experience-options"></div><script>document.querySelector('#experience').onclick=()=>setTimeout(()=>{document.querySelector('#experience-options').innerHTML=${JSON.stringify(experienceOptions)};},150);</script>`:scenario==='experience-delayed'?`<div id="experience-options"></div><script>setTimeout(()=>{document.querySelector('#experience-options').innerHTML=${JSON.stringify(experienceOptions)};},250);</script>`:experienceOptions;
-      res.end(`<nav><a href="/jobs/">Jobs</a></nav>${experience}<ul>${ids.map(id=>`<li><a href="/jobs/view/${id}/"><strong>Software Engineer ${id}</strong></a><span class="artdeco-entity-lockup__subtitle">Example</span></li>`).join('')}</ul>`);
+      res.end(`<nav><a href="/jobs/">Jobs</a></nav>${experience}<ul>${cards.map(card=>`<li><a href="/jobs/view/${escapeHtml(card.slug||card.id)}/"><strong>${escapeHtml(card.title)}</strong></a><span class="artdeco-entity-lockup__subtitle">${escapeHtml(card.company)}</span></li>`).join('')}</ul>`);
       return;
     }
     if (!url.pathname.startsWith('/jobs/view')) {res.end('<nav><a href="/jobs/">Jobs</a></nav><h1>Feed</h1>');return;}
+    const jobId=url.pathname.match(/\/jobs\/view\/(\d+)/)?.[1];state.views.push(jobId);
+    const posting=state.postingFor?.(jobId);
     const modernDescription=text=>`<div class="cky-description-section"><div></div><div><h2>About the job</h2></div><p><span>${text}</span></p></div>`;
     const descriptions={
       'description-modern':modernDescription('Build Python software for our internship team.'),
@@ -46,8 +52,8 @@ export async function startFixture(scenario='success') {
       'description-verification':'<div id="job-details"></div>',
       'description-no-metadata':'<div id="job-details">Remote Python software role.</div>'
     };
-    const metadata=scenario.startsWith('description-')?'':'<h1>Software Engineer</h1><a href="/company/example/">Example</a>';
-    const description=descriptions[scenario]??'<div id="job-details">Remote Python software role.</div>';
+    const metadata=posting?`<header data-job-header><h1>${escapeHtml(posting.title||'Software Engineer')}</h1><a href="/company/example/">Example</a>${posting.header||''}</header>`:scenario.startsWith('description-')?'':'<h1>Software Engineer</h1><a href="/company/example/">Example</a>';
+    const description=posting?`<div id="job-details">${escapeHtml(posting.description||'Required: Python')}</div>${posting.related||''}`:descriptions[scenario]??'<div id="job-details">Remote Python software role.</div>';
     res.end(`<!doctype html><html><body><nav><a href="/jobs/">Jobs</a></nav><main>
       ${metadata}${description}
       ${scenario==='external'?'<a href="https://example.com/apply">Apply</a>':'<button id="easy" aria-label="Easy Apply to Software Engineer">Easy Apply</button>'}
