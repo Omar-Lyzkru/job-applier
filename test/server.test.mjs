@@ -29,6 +29,29 @@ test('current-student common question stays blank until an explicit answer is sa
   await send('/api/answers',{'are you currently a student':false});student=(await read()).answerMemory.commonQuestions.find(q=>q.key==='are you currently a student');assert.equal(student.answer,false);
 });
 
+test('bootstrap groups operational repeats and preserves raw questions after one answer save',async t=>{
+  const {store,app,send}=await setup(t),read=async()=>await (await fetch(app.url+'/api/bootstrap')).json();
+  const base={key:'evening work',label:'Evening work?',type:'radio',required:true,options:[{label:'Yes',value:'y'},{label:'No',value:'n'}],blocker:'operational',reason:'Could not select answer'};
+  const questions=[{...base,jobId:'1001'},{...base,jobId:'1002',reason:'Answer entry timed out'},{...base,jobId:'1001'},{...base,jobId:''}];
+  await store.saveQuestions(questions);
+  let data=await read();assert.equal(data.questionGroups?.length,1);assert.deepEqual(data.questionCounts,{distinctQuestions:1,affectedApplications:2,occurrences:4});
+  const draftId=data.questionGroups[0].draftId;
+  assert.equal((await send('/api/answers',{'evening work':false})).status,200);
+  data=await read();assert.equal(data.questions.length,4);assert.equal(data.questionGroups[0].savedAnswer.answer,false);assert.equal(data.questionGroups[0].draftId,draftId);
+  assert.deepEqual(await store.getQuestions(),questions);assert.deepEqual(data.answers,{'evening work':false});
+});
+
+test('grouped old questions keep full-history job context beyond the latest 200 records',async t=>{
+  const {store,app}=await setup(t);
+  await store.createRecord({id:'1001',title:'Old role',company:'Old employer',url:'https://www.linkedin.com/jobs/view/1001/'},'needs_answer');
+  for(let i=0;i<201;i++)await store.createRecord({id:String(2000+i),title:'Newer role',company:'Other'},'skipped');
+  await store.saveQuestions([{key:'why us',label:'Why us?',type:'text',jobId:'1001',blocker:'operational',reason:'Entry failed'}]);
+  const data=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.equal(data.history.length,200);assert.equal(data.history.some(r=>r.job.id==='1001'),false);
+  assert.equal(data.questionGroups?.[0]?.occurrences[0].jobTitle,'Old role');
+  assert.equal(data.questionGroups[0].occurrences[0].jobUrl,'https://www.linkedin.com/jobs/view/1001/');
+});
+
 test('API retains matching settings on save and rejects oversized expanded queries',async t=>{
   const {app,send}=await setup(t);
   assert.equal((await send('/api/config',{intelligence:{enabled:true,minimumFitScore:60,candidate:{student:false,professionalYears:0,skills:['JS']},roleFamilies:['web'],regions:[{name:'United States',priority:8,workplace:'remote'}]}})).status,200);

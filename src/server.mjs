@@ -7,7 +7,8 @@ import {createStore} from './store.mjs';
 import {createRunner} from './runner.mjs';
 import {createLinkedInAdapter} from './browser/linkedin.mjs';
 import {MAX_RESUME_BYTES,readiness,dayKey,countsTowardCap,resolveAnswer} from './domain.mjs';
-import {commonQuestions,savedAnswerKey,normalizeQuestion} from './answer-memory.mjs';
+import {commonQuestions,savedAnswerKey,normalizeQuestion,describeQuestion} from './answer-memory.mjs';
+import {groupPendingQuestions} from './question-groups.mjs';
 import {analyzeResume} from './resume-analysis.mjs';
 import {roleFamilyPresets} from './search-profiles.mjs';
 import {skillVocabulary,canonicalSkill} from './skills.mjs';
@@ -63,8 +64,10 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
           .filter(match=>Object.hasOwn(answers,match.sourceQuestion)&&Object.is(answers[match.sourceQuestion],match.answer));
         const jobs=new Map(history.map(record=>[record.job.id,record.job]));
         for(const original of pending){
-          const question={...original,company:original.company||jobs.get(original.jobId)?.company||''};
+          const job=jobs.get(original.jobId);
+          const question={...original,company:original.company||job?.company||'',jobTitle:job?.title||'',jobUrl:job?.url||''};
           question.answerKey=savedAnswerKey(question);
+          question.description=describeQuestion(question);
           const resolution=resolveAnswer(question,config.profile,answers);
           question.suggestions=resolution.suggestions||[];
           if(resolution.kind==='fill')question.savedAnswer={answer:resolution.answer,displayAnswer:resolution.optionLabel??resolution.value,sourceQuestion:resolution.sourceQuestion,match:resolution.match,source:resolution.source};
@@ -92,7 +95,10 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
         const uniqueReuse=new Map(reusedAnswers.map(match=>[`${match.company}:${match.label}`,match]));
         const answerMemory={commonQuestions:prepared,employers,smsAnswers,reusedAnswers:[...uniqueReuse.values()].slice(-40)};
         const intelligenceOptions={families:roleFamilyPresets,skills:skillVocabulary.map(([label])=>({id:canonicalSkill(label),label}))};
-        send({config,answers,questions,answerMemory,intelligenceOptions,history:history.slice(-200).reverse(),status:await status(),readiness:readiness(config),token});return;
+        const questionGroups=groupPendingQuestions(questions);
+        const jobIds=new Set(questions.map(question=>String(question.jobId??'').trim()).filter(id=>id&&!['unknown','undefined','null'].includes(id.toLowerCase())));
+        const questionCounts={distinctQuestions:questionGroups.length,affectedApplications:jobIds.size,occurrences:questions.length};
+        send({config,answers,questions,questionGroups,questionCounts,answerMemory,intelligenceOptions,history:history.slice(-200).reverse(),status:await status(),readiness:readiness(config),token});return;
       }
       if(req.method==='GET' && path==='/api/status'){send(await status());return;}
       if(req.method==='GET' && path==='/api/history.csv'){
