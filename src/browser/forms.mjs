@@ -31,7 +31,7 @@ export async function discoverFields(dialog) {
         if(area.querySelector('select,textarea,input:not([type="radio"]):not([type="file"]):not([type="hidden"]),[role="combobox"],[role="textbox"]'))break;
         const labelled=Array.from(area.querySelectorAll('div,p,span,label,legend,h2,h3,h4')).some(el=>{
           const direct=Array.from(el.childNodes).filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.textContent).join(' ').trim();
-          return visible(el)&&/^(?:resume|résumé|cv)$/i.test(el.getAttribute('aria-label')||direct);
+          return visible(el)&&/^(?:resume|résumé|cv)\s*\*?$/i.test(el.getAttribute('aria-label')||direct);
         });
         const radios=Array.from(area.querySelectorAll('input[type="radio"]'));
         if(labelled&&radios.every(radio=>/\.(?:pdf|docx?)$/i.test(labelOf(radio)))){modernAreas.add(area);break;}
@@ -92,7 +92,7 @@ export async function discoverFields(dialog) {
   });
 }
 function hasValue(field) {return field.type==='checkbox'?field.value===true:String(field.value||'').trim()!=='';}
-async function setCheckbox(dialog,locator,value,signal){
+async function setNativeChecked(dialog,locator,value,signal){
   checkStopped(signal);if(await locator.isChecked()===value)return;
   const marker=randomUUID();
   const labelled=await locator.evaluate((input,marker)=>{
@@ -100,12 +100,12 @@ async function setCheckbox(dialog,locator,value,signal){
     if(labels.length!==1)return false;
     labels[0].setAttribute('data-applier-check-label',marker);return true;
   },marker);
-  // Current LinkedIn checkboxes draw their visible control above the native input.
-  // The associated HTML label toggles that exact input without forcing a click.
+  // LinkedIn draws some choice controls above a covered or zero-size input.
+  // Its associated HTML label toggles that exact input; verify the result below.
   if(labelled)await dialog.locator(`[data-applier-check-label="${marker}"]`).click();
   else await locator.setChecked(value);
   checkStopped(signal);
-  if(await locator.isChecked()!==value)throw new Error('The checkbox did not retain the saved choice');
+  if(await locator.isChecked()!==value)throw new Error('The control did not retain the saved choice');
 }
 async function uploadResume(dialog,entry,{resumePath,signal,applicationState,uploadTimeout}) {
   if(!resumePath)throw new Error('No selected résumé');
@@ -144,7 +144,7 @@ async function uploadResume(dialog,entry,{resumePath,signal,applicationState,upl
         return Boolean(area?.closest('[aria-busy="true"]') || area?.querySelector('[aria-busy="true"],[role="progressbar"]'));
       });
       if(!busy){
-        await choice.locator.check();
+        await setNativeChecked(dialog,choice.locator,true,signal);
         if(await choice.locator.isChecked()){
           applicationState.resumeName=filename;applicationState.resumeVerified=true;return;
         }
@@ -191,7 +191,7 @@ export async function fillApplicationFields(dialog,{profile,answers,resumePath,s
       if(!hasValue(field))continue;
       try{
         if(readOnly)throw new Error('The prefilled value cannot be cleared');
-        if(field.type==='checkbox')await setCheckbox(dialog,locator,false,signal);
+        if(field.type==='checkbox')await setNativeChecked(dialog,locator,false,signal);
         else if(field.type==='select' && field.options.some(option=>option.value===''))await locator.selectOption('');
         else if(field.type==='radio'||field.type==='select')throw new Error('The prefilled choice cannot be cleared safely');
         else await locator.fill('');
@@ -200,7 +200,7 @@ export async function fillApplicationFields(dialog,{profile,answers,resumePath,s
     }
     try{
       if(field.type==='checkbox'){
-        await setCheckbox(dialog,locator,answer.value,signal);
+        await setNativeChecked(dialog,locator,answer.value,signal);
         if(field.required && !answer.value){question(field,'The required checkbox needs an explicit yes answer');continue;}
       }else if(field.type==='select')await locator.selectOption(answer.value);
       else if(field.type==='radio')await radios.find(option=>option.value===answer.value).locator.check();

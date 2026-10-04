@@ -194,6 +194,35 @@ submission guard; that guard was never called and no real application was
 submitted. Live submission confirmation remains unverified. Restart the server
 to load these fixes before starting another run.
 
+## Required résumé selector recognition — 2026-10-03
+
+Ten BGE applications had saved the résumé document selector as an operational
+question with a generated radio-group label and PDF filename choices. A live
+inspection found the short title **Resume***, which the exact **Resume** matcher
+rejected. The matcher now permits a trailing required-field asterisk only on
+short Resume/Résumé/CV labels; upload controls, filename-radio checks, and scoped
+region boundaries still apply. Ordinary CV screening questions remain separate.
+
+The document radios in this layout have zero width and height with one visible
+associated HTML label. The native choice helper now selects the fresh document
+through that label and verifies the checked state. Ambiguous labels, failed or
+pending uploads, old same-named documents, and Stop retain their blocking behavior.
+The required-title and zero-size-radio regressions failed before the fixes.
+Fresh complete suites pass: **60 unit/API tests and 72 browser scenarios**.
+Syntax and whitespace checks pass; a separate read-only review found no issues.
+
+A signed-in BGE dry preview uploaded and selected the fresh résumé, then returned
+seven genuine questions: school, major, expected graduation, position type,
+location, department, and address. It discarded the draft without submission.
+The ten confirmed bogus local entries and one generated résumé-filename answer
+were backed up before removal. The genuine preview questions were saved; profile,
+other answers, and all 157 existing history records were preserved. This was a
+scoped repair of the verified local entries, not a general question migration.
+
+The updated app was restarted. A browser check confirmed readable question
+headings, 31 school choices, and the preserved genuine answer library. The local
+server now runs independently of the chat's foreground command session.
+
 ## Execution record
 
 # SDD ledger — plan: docs/superpowers/plans/2026-10-01-linkedin-easy-apply.md

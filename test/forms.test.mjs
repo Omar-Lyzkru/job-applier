@@ -42,6 +42,27 @@ test('modern résumé upload waits until the new card is accepted, not merely pr
   assert.equal(await page.locator('#resume-region').getAttribute('aria-busy'),null);
 });
 
+test('required Resume* region uploads the résumé without creating a question or choosing a cover letter',async t=>{
+  const {page,dialog,options,applicationState}=await setup(t,{requiredResume:true,coverLetter:true});
+  const result=await fillApplicationFields(dialog,options);
+  assert.deepEqual(result,{questions:[],errors:[]});
+  assert.equal(applicationState.resumeVerified,true);
+  assert.equal(await dialog.locator('input[value=new-document]').isChecked(),true);
+  assert.equal(await page.evaluate(()=>window.uploadClicks),1);
+  assert.equal(await page.evaluate(()=>window.coverUploadClicks),0);
+});
+
+test('zero-size résumé radios select the fresh document through its associated visible label',async t=>{
+  const {page,dialog,options,applicationState}=await setup(t,{hiddenDocumentRadios:true});
+  const result=await fillApplicationFields(dialog,options);
+  assert.deepEqual(result,{questions:[],errors:[]});
+  assert.equal(await dialog.locator('input[value=new-document]').isVisible(),false);
+  assert.equal(await dialog.locator('input[value=new-document]').isChecked(),true);
+  assert.equal(await dialog.locator('input[value=old-document]').isChecked(),false);
+  assert.equal(applicationState.resumeVerified,true);
+  assert.equal(await page.evaluate(()=>window.acceptedDocument.name),applicationState.resumeName);
+});
+
 test('résumé success alert is accepted only after the fresh document is verified',async t=>{
   const {page,dialog,options,applicationState}=await setup(t);
   assert.deepEqual(await fillApplicationFields(dialog,options),{questions:[],errors:[]});
@@ -90,7 +111,7 @@ test('Stop during modern upload confirmation never marks the pending document as
 });
 
 test('modern résumé recognition preserves explicit CV screening answers and unrelated unsupported groups',async t=>{
-  const {page,dialog,options}=await setup(t,{screening:true});
+  const {page,dialog,options}=await setup(t,{screening:true,requiredResume:true});
   const result=await fillApplicationFields(dialog,{...options,answers:{'can you provide a cv':true}});
   assert.deepEqual(result,{questions:[],errors:[]});
   assert.equal(await dialog.locator('input[name="screening-cv"][value="yes"]').isChecked(),true);
