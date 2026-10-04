@@ -2,6 +2,7 @@ import {basename,extname} from 'node:path';
 import {readFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {normalizeQuestion,resolveAnswer} from '../domain.mjs';
+import {savedAnswerKey} from '../answer-memory.mjs';
 
 export function checkStopped(signal) {
   if (signal?.aborted) throw new Error('Stopped before submission');
@@ -50,6 +51,40 @@ export async function discoverFields(dialog) {
       const group=el.closest('fieldset,section');
       return Boolean(group?.querySelector('input[type="file"]') && /resume|résumé|\bcv\b/i.test(group.querySelector('legend,h2,h3')?.textContent||''));
     };
+    const modernRadioGroups=new Map(),modernRadioQuestions=new Map();
+    const questionKey=text=>String(text).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+    for(const group of root.querySelectorAll('fieldset[role="radiogroup"]')){
+      if(documentChooser(group)||group.hasAttribute('aria-label')||group.hasAttribute('aria-labelledby')||group.querySelector('legend'))continue;
+      const radios=Array.from(group.querySelectorAll('input[type="radio"]'));
+      if(radios.length<2||!radios[0].name||radios.some(input=>input.name!==radios[0].name||input.disabled||!visible(input)))continue;
+      const shared=radios[0].getAttribute('aria-label')||'';
+      if(!questionKey(shared)||radios.some(input=>questionKey(input.getAttribute('aria-label')||'')!==questionKey(shared)))continue;
+      // Hydrated groups repeat the question on every input. Its exact nearby
+      // heading supplies the required marker; an unrelated heading cannot.
+      const headings=Array.from(group.parentElement?.children||[]).filter(el=>el!==group&&visible(el)&&!el.querySelector('input,select,textarea')&&questionKey(labelText(el))===questionKey(shared));
+      if(headings.length!==1)continue;
+      const question=labelText(headings[0]);
+      modernRadioQuestions.set(group,question);
+      const extraControl=controls.some(control=>control!==group&&group.contains(control)&&!radios.includes(control)&&!control.matches('input[type="hidden"]:not([role]):not([contenteditable="true"])'));
+      if(/^(?:resume|résumé|cv)\s*\*?$/i.test(question)||extraControl||controls.some(input=>input.type==='radio'&&input.name===radios[0].name&&!group.contains(input)))continue;
+      const choices=new Map();
+      for(const radio of radios){
+        const labels=Array.from(radio.labels||[]).filter(visible).map(labelText).filter(Boolean);
+        if(labels.length>1){choices.clear();break;}
+        let choice=labels.length===1?labels[0]:'';
+        // Some linked labels draw only the empty circle. The first local row
+        // with one radio contains its visible sibling text, such as Yes or No.
+        if(!choice)for(let row=radio.parentElement,depth=0;row&&row!==group&&depth<4;row=row.parentElement,depth++){
+          if(row.querySelectorAll('input[type="radio"]').length!==1||row.querySelector('select,textarea,input:not([type="radio"]):not([type="hidden"]),[role="radio"]'))break;
+          const text=labelText(row);
+          if(text){choice=text;break;}
+        }
+        if(!choice||questionKey(choice)===questionKey(shared)){choices.clear();break;}
+        choices.set(radio,choice);
+      }
+      if(choices.size!==radios.length||new Set(Array.from(choices.values()).map(questionKey)).size!==radios.length)continue;
+      modernRadioGroups.set(group,{question,radios,choices});
+    }
     controls.forEach((el,index)=>el.setAttribute('data-applier-control',String(index)));
     for(const el of controls){
       const upload=modernUploads.find(item=>item.button===el);
@@ -59,29 +94,33 @@ export async function discoverFields(dialog) {
       if (el.disabled || ['hidden','submit','button','reset'].includes(type) || (!visible(el) && type!=='file'))continue;
       if(!native){
         if(el.matches('[role="radiogroup"]')&&documentChooser(el)&&el.querySelector('input[type="radio"]')&&!el.querySelector('[role="radio"]'))continue;
+        if(modernRadioGroups.has(el))continue;
         // Discover the visible widget even when its native backing input is hidden.
         // Custom controls are blockers until their semantics can be supported.
         if(el.parentElement.closest('[role="radiogroup"],[role="listbox"]'))continue;
-        const selected=el.getAttribute('aria-checked')==='true'||el.getAttribute('aria-selected')==='true'||Boolean(el.querySelector('[aria-checked="true"],[aria-selected="true"]'));
+        const selected=el.getAttribute('aria-checked')==='true'||el.getAttribute('aria-selected')==='true'||Boolean(el.querySelector('[aria-checked="true"],[aria-selected="true"]'))||Boolean(modernRadioQuestions.has(el)&&el.querySelector('input[type="radio"]:checked'));
         const value=selected?'Selected':el.getAttribute('aria-valuenow')||el.getAttribute('aria-valuetext')||el.value|| (el.matches('[contenteditable="true"],[role="textbox"],[role="combobox"]')?el.textContent:'');
-        const label=labelOf(el);
-        fields.push({label,type:'unsupported',required:el.getAttribute('aria-required')==='true'||/\*/.test(label),value,options:[],id:el.getAttribute('data-applier-control')});
+        const label=modernRadioQuestions.get(el)||labelOf(el);
+        const requiredChild=modernRadioQuestions.has(el)&&controls.some(control=>control!==el&&el.contains(control)&&(control.required||control.getAttribute('aria-required')==='true'));
+        fields.push({label,type:'unsupported',required:el.getAttribute('aria-required')==='true'||requiredChild||/\*/.test(label),value,options:[],id:el.getAttribute('data-applier-control')});
         continue;
       }
       if(type==='radio'){
+        const parent=el.closest('fieldset,[role="group"],.fb-dash-form-element');
+        if(modernRadioQuestions.has(parent)&&!modernRadioGroups.has(parent))continue;
         const name=el.name||el.id;
         if(seen.has(name))continue;seen.add(name);
-        const group=controls.filter(input=>input.type==='radio' && (input.name||input.id)===name);
-        const parent=el.closest('fieldset,[role="group"],.fb-dash-form-element');
-        const question=parent?.querySelector('legend,[id$="label"],.fb-dash-form-element__label')?.textContent.trim() || parent?.getAttribute('aria-label') || name;
-        fields.push({label:question,type:'radio',documentSelection:documentChooser(el),required:group.some(input=>input.required||input.getAttribute('aria-required')==='true')||/\*/.test(question),value:group.find(input=>input.checked)?.value||'',options:group.map(input=>({label:labelOf(input),value:input.value,id:input.getAttribute('data-applier-control')})),id:el.getAttribute('data-applier-control')});
+        const modern=modernRadioGroups.get(parent);
+        const group=modern?.radios||controls.filter(input=>input.type==='radio' && (input.name||input.id)===name);
+        const question=modern?.question||parent?.querySelector('legend,[id$="label"],.fb-dash-form-element__label')?.textContent.trim() || parent?.getAttribute('aria-label') || name;
+        fields.push({label:question,type:'radio',documentSelection:documentChooser(el),required:parent?.getAttribute('aria-required')==='true'||group.some(input=>input.required||input.getAttribute('aria-required')==='true')||/\*/.test(question),value:group.find(input=>input.checked)?.value||'',options:group.map(input=>({label:modern?.choices.get(input)||labelOf(input),value:input.value,id:input.getAttribute('data-applier-control')})),id:el.getAttribute('data-applier-control')});
       }else{
         let label=labelOf(el);
         if(type==='file' && !/resume|résumé|\bcv\b/i.test(label)){
           const nearby=el.closest('fieldset,section,.jobs-document-upload')?.textContent||'';
           if(/resume|résumé|\bcv\b/i.test(nearby))label='Resume';
         }
-        fields.push({label,type:el.tagName==='SELECT'?'select':type,required:el.required||el.getAttribute('aria-required')==='true'||/\*/.test(label),value:type==='checkbox'?el.checked:type==='file'?Array.from(el.files||[]).map(file=>file.name).join(', '):el.value||el.textContent||'',options:el.tagName==='SELECT'?Array.from(el.options).filter(option=>!option.disabled).map(option=>({label:option.textContent.trim(),value:option.value})):[],id:el.getAttribute('data-applier-control'),readOnly:Boolean(el.readOnly)});
+        fields.push({label,type:el.tagName==='SELECT'?'select':type,required:el.required||el.getAttribute('aria-required')==='true'||/\*/.test(label),value:type==='checkbox'?el.checked:type==='file'?Array.from(el.files||[]).map(file=>file.name).join(', '):el.value||el.textContent||'',options:el.tagName==='SELECT'?Array.from(el.options).filter(option=>!option.disabled).map(option=>({label:option.textContent.trim(),value:option.value})):[],id:el.getAttribute('data-applier-control'),readOnly:Boolean(el.readOnly),...(el.pattern?{pattern:el.pattern}:{}),...(el.placeholder?{placeholder:el.placeholder}:{})});
       }
     }
     return fields;
@@ -154,10 +193,10 @@ async function uploadResume(dialog,entry,{resumePath,signal,applicationState,upl
   }
   throw new Error('Upload was not confirmed as the selected application document');
 }
-export async function fillApplicationFields(dialog,{profile,answers,resumePath,signal,applicationState={},uploadTimeout=10000}) {
+export async function fillApplicationFields(dialog,{profile,answers,resumePath,signal,company='',applicationState={},uploadTimeout=10000}) {
   const questions=[],errors=[];
   let fields=await discoverFields(dialog);
-  const question=(field,reason,blocker='operational')=>questions.push({key:field.key,label:field.label,type:field.type,options:field.options.map(({label,value})=>({label,value})),reason,blocker});
+  const question=(field,reason,blocker='operational',suggestions=[])=>questions.push({key:field.key,label:field.label,type:field.type,required:field.required,company,answerKey:savedAnswerKey({...field,company}),options:field.options.map(({label,value})=>({label,value})),...(field.pattern?{pattern:field.pattern}:{}),...(field.placeholder?{placeholder:field.placeholder}:{}),reason,blocker,suggestions});
   for(const entry of fields.filter(entry=>entry.field.type==='file')){
     checkStopped(signal);
     if(!/resume|résumé|\bcv\b/i.test(entry.field.label)){
@@ -172,7 +211,8 @@ export async function fillApplicationFields(dialog,{profile,answers,resumePath,s
   fields=await discoverFields(dialog);
   for(const entry of fields){
     checkStopped(signal);
-    const {field,locator,radios,readOnly}=entry;
+    const {field:discovered,locator,radios,readOnly}=entry;
+    const field={...discovered,company};
     if(field.type==='file')continue;
     // Only structural document components are résumé selectors. Ordinary CV
     // screening questions continue through the exact saved-answer resolver.
@@ -187,7 +227,11 @@ export async function fillApplicationFields(dialog,{profile,answers,resumePath,s
     }
     const answer=resolveAnswer(field,profile,answers);
     if(answer.kind==='missing'){
-      if(field.required){question(field,answer.reason,'missing_answer');continue;}
+      if(answer.manual){
+        if(field.required||hasValue(field))question({...field,type:'unsupported'},answer.reason,'operational',answer.suggestions);
+        continue;
+      }
+      if(field.required){question(field,answer.reason,'missing_answer',answer.suggestions);continue;}
       if(!hasValue(field))continue;
       try{
         if(readOnly)throw new Error('The prefilled value cannot be cleared');
@@ -202,14 +246,28 @@ export async function fillApplicationFields(dialog,{profile,answers,resumePath,s
       if(field.type==='checkbox'){
         await setNativeChecked(dialog,locator,answer.value,signal);
         if(field.required && !answer.value){question(field,'The required checkbox needs an explicit yes answer');continue;}
-      }else if(field.type==='select')await locator.selectOption(answer.value);
-      else if(field.type==='radio')await radios.find(option=>option.value===answer.value).locator.check();
+      }else if(field.type==='select'){
+        await locator.selectOption({label:answer.optionLabel});
+        const selected=await locator.locator('option:checked').textContent();
+        if(normalizeQuestion(selected)!==normalizeQuestion(answer.optionLabel))throw new Error('The field did not retain the saved choice');
+      }
+      else if(field.type==='radio'){
+        const choices=radios.filter(option=>normalizeQuestion(option.label)===normalizeQuestion(answer.optionLabel));
+        if(choices.length!==1)throw new Error('Could not identify the exact saved choice');
+        await setNativeChecked(dialog,choices[0].locator,true,signal);
+      }
       else if(readOnly){if(String(field.value)!==answer.value)throw new Error('Read-only value differs from your saved answer');}
       else await locator.fill(answer.value);
       if(field.type!=='radio' && field.type!=='checkbox'){
         const actual=await locator.inputValue();
         const equal=field.type==='tel'?actual.replace(/\D/g,'')===answer.value.replace(/\D/g,''):field.type==='number'?Number(actual)===Number(answer.value):actual===answer.value;
         if(!equal)throw new Error('The field did not retain your saved answer');
+      }
+      if(answer.match!=='profile'&&answer.sourceQuestion!==field.key){
+        applicationState.answerMatches ||= [];
+        const match={label:field.label,company,answer:answer.answer,sourceQuestion:answer.sourceQuestion};
+        const index=applicationState.answerMatches.findIndex(previous=>previous.label===field.label&&previous.company===company);
+        if(index<0)applicationState.answerMatches.push(match);else applicationState.answerMatches[index]=match;
       }
     }catch(error){question(field,`Could not enter the saved answer: ${error.message.split('\n')[0]}`);}
   }

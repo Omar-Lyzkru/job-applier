@@ -223,6 +223,58 @@ The updated app was restarted. A browser check confirmed readable question
 headings, 31 school choices, and the preserved genuine answer library. The local
 server now runs independently of the chat's foreground command session.
 
+## Saved answer memory and common questions — 2026-10-04
+
+Answers now offers a common-question bank for recurring education, location,
+address, US work authorization, and US sponsorship questions. Entries remain
+blank until explicitly supplied or matched to an existing saved answer. Known
+equivalent wording can reuse an answer and display its original question.
+Token similarity produces review suggestions only. Conflicting answers,
+incompatible offered choices, and graduation date format differences remain
+pending. Current and completed education, country, question polarity, and
+authorization versus sponsorship are kept distinct.
+
+SMS application-update consent is saved per employer. Marketing, calling,
+negative consent, and other unrecognized wording require a separate exact
+answer. Unknown employers require manual completion in LinkedIn. No legal or
+consent answers are inferred from the résumé or preselected. Editing or deleting
+a saved answer removes stale recognized-answer information from the dashboard.
+Form fills record the source question only after verifying the entered value;
+that provenance survives pending-question cleanup in application history.
+
+A live BGE preview exposed three missed required Yes/No questions. Its fieldsets
+have no legend or group label: each native radio repeats the question in its
+ARIA label, the nearby exact question heading carries the required asterisk,
+and sibling paragraphs provide Yes/No while empty associated labels draw the
+circles. Discovery now supports this observed structure and verifies the exact
+selected radio even when both option values are `on`. Ambiguous choices,
+conflicting explicit group labels, duplicate radio names, mixed custom widgets,
+and unrecognized résumé selectors remain named operational blockers. Required
+native and ARIA descendants cannot be lost when such a group is unsupported.
+
+The corrected signed-in BGE preview returned exactly the work authorization,
+current/future visa sponsorship, and application SMS consent questions with
+Yes/No choices. It used a dry run plus a rejecting final submission guard, which
+was never called, and discarded the draft without submission. Live submission
+confirmation remains unverified.
+
+Common-question, pending-answer, answer-library, and SMS drafts survive polling
+and unrelated saves. Choice inputs continue to use unique displayed meanings
+rather than internal option values. A suggestion requires explicit selection and
+saving. Profile and answer changes retain the existing next-run snapshot policy.
+
+Fresh complete suites pass: **87 unit/API tests and 98 browser scenarios**.
+JavaScript syntax and Git whitespace checks pass. Desktop and mobile Answers
+screens were inspected without document overflow. Separate read-only review
+found required-descendant and mixed-widget guard gaps; both failed before their
+fixes and passed afterward. No unresolved review findings remain.
+
+The local app was started with the update after confirming no active run.
+Config, answers, pending questions, and history were privately backed up, and
+their stored contents were verified unchanged after startup. A browser check
+confirmed the existing common answers, blank separate authorization/sponsorship
+choices, and employer-specific text message setup.
+
 ## Execution record
 
 # SDD ledger — plan: docs/superpowers/plans/2026-10-01-linkedin-easy-apply.md

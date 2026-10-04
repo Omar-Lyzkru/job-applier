@@ -67,6 +67,15 @@ test('runner does not require a description for a search with no keyword filters
   await runner.start();await runner.waitForIdle();
   assert.equal((await store.getHistory())[0].status,'submitted');
 });
+
+test('runner retains actual answer-reuse provenance after successful application questions are cleared',async t=>{
+  const {runner,store,adapter}=await setup(t,{count:1,config:{dryRun:true}});
+  await store.saveQuestions([{jobId:'1001',key:'university name',label:'University name',type:'text'}]);
+  adapter.apply=async()=>({status:'ready',reason:'Review reached',answerMatches:[{label:'University name',company:'Example',answer:'Example University',sourceQuestion:'school'}]});
+  await runner.start();await runner.waitForIdle();
+  assert.equal((await store.getQuestions()).length,0);
+  assert.deepEqual((await store.getHistory())[0].answerMatches,[{label:'University name',company:'Example',answer:'Example University',sourceQuestion:'school'}]);
+});
 test('runner records an inspection error once and halts with no submission attempt',async t=>{
   const {runner,store,adapter,observed}=await setup(t);
   adapter.inspect=async()=>{throw new Error('Could not read the job description. Open LinkedIn to check this job.');};

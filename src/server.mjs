@@ -7,6 +7,7 @@ import {createStore} from './store.mjs';
 import {createRunner} from './runner.mjs';
 import {createLinkedInAdapter} from './browser/linkedin.mjs';
 import {MAX_RESUME_BYTES,readiness,dayKey,countsTowardCap,resolveAnswer} from './domain.mjs';
+import {commonQuestions,savedAnswerKey,normalizeQuestion} from './answer-memory.mjs';
 import {analyzeResume} from './resume-analysis.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
@@ -56,13 +57,38 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
       const path=new URL(req.url,`http://127.0.0.1:${actualPort}`).pathname;
       if(req.method==='GET' && path==='/api/bootstrap'){
         const config=await store.getConfig(),answers=await store.getAnswers(),history=await store.getHistory();
-        const questions=(await store.getQuestions()).filter(question=>{
+        const pending=await store.getQuestions(),questions=[],reusedAnswers=history.slice(-30).flatMap(record=>Array.isArray(record.answerMatches)?record.answerMatches:[])
+          .filter(match=>Object.hasOwn(answers,match.sourceQuestion)&&Object.is(answers[match.sourceQuestion],match.answer));
+        const jobs=new Map(history.map(record=>[record.job.id,record.job]));
+        for(const original of pending){
+          const question={...original,company:original.company||jobs.get(original.jobId)?.company||''};
+          question.answerKey=savedAnswerKey(question);
+          const resolution=resolveAnswer(question,config.profile,answers);
+          question.suggestions=resolution.suggestions||[];
+          if(resolution.manual){question.type='unsupported';question.blocker='operational';question.reason=resolution.reason;}
           // Saving an answer only resolves missing information. Entry/verification
           // failures remain pending until a later successful application clears them.
           const missing=question.blocker==='missing_answer' || (!question.blocker && (!question.reason || /^(No explicit saved answer|Saved answer is empty|Saved answer does not match|Checkbox needs|A numeric answer)/.test(question.reason)));
-          return !missing || resolveAnswer(question,config.profile,answers).kind==='missing';
+          if(!missing||resolution.kind==='missing'){
+            if(missing)question.reason=resolution.reason;
+            questions.push(question);
+          }else if(resolution.match!=='profile'&&resolution.sourceQuestion!==normalizeQuestion(question.label)){
+            reusedAnswers.push({label:question.label,company:question.company,answer:resolution.answer,sourceQuestion:resolution.sourceQuestion});
+          }
+        }
+        const employers=[...new Set([...history.slice().reverse().map(record=>record.job.company),...pending.map(question=>question.company)].filter(company=>typeof company==='string'&&company.trim()&&company!=='Company on LinkedIn'))];
+        const smsAnswers=Object.fromEntries(employers.flatMap(company=>{
+          const key=`sms consent for ${normalizeQuestion(company)}`;
+          return Object.hasOwn(answers,key)?[[company,answers[key]]]:[];
+        }));
+        const prepared=commonQuestions.map(question=>{
+          const resolution=resolveAnswer(question,config.profile,answers);
+          return {...question,status:resolution.kind==='fill'?'saved':resolution.suggestions?.length?'review':'unanswered',
+            ...(resolution.kind==='fill'?{answer:resolution.answer,sourceQuestion:resolution.sourceQuestion}:{}),suggestions:resolution.suggestions||[]};
         });
-        send({config,answers,questions,history:history.slice(-200).reverse(),status:await status(),readiness:readiness(config),token});return;
+        const uniqueReuse=new Map(reusedAnswers.map(match=>[`${match.company}:${match.label}`,match]));
+        const answerMemory={commonQuestions:prepared,employers,smsAnswers,reusedAnswers:[...uniqueReuse.values()].slice(-40)};
+        send({config,answers,questions,answerMemory,history:history.slice(-200).reverse(),status:await status(),readiness:readiness(config),token});return;
       }
       if(req.method==='GET' && path==='/api/status'){send(await status());return;}
       if(req.method==='GET' && path==='/api/history.csv'){

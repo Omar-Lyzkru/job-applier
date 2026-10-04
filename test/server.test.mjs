@@ -87,6 +87,103 @@ test('pending operational blockers remain visible after their answer is saved',a
   assert.equal((await (await fetch(app.url+'/api/bootstrap')).json()).questions.length,0);
 });
 
+test('answer memory prepares common questions from saved answers without inventing authorization or sponsorship',async t=>{
+  const {store,app}=await setup(t);
+  await store.saveAnswers({School:'University of Houston','Degree Type':"Bachelor's Degree",Major:'Computer Science/IT'});
+  const before=await store.getAnswers();
+  const data=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.ok(data.answerMemory,'Common questions are available before a job asks them');
+  const questions=data.answerMemory.commonQuestions;
+  assert.equal(questions.find(question=>question.key==='school').answer,'University of Houston');
+  assert.equal(questions.find(question=>question.key==='degree type').answer,"Bachelor's Degree");
+  for(const key of ['are you legally authorized to work in the united states','will you now or in the future require sponsorship to work in the united states']){
+    const question=questions.find(question=>question.key===key);
+    assert.equal(question.status,'unanswered');
+    assert.equal(question.answer,undefined);
+  }
+  assert.deepEqual(await store.getAnswers(),before,'Viewing predictions never saves or fabricates answers');
+});
+
+test('bootstrap explains automatically reused answers and preserves operational blockers',async t=>{
+  const {store,app}=await setup(t);
+  await store.createRecord({id:'2001',title:'Intern',company:'Example Company'},'needs_answer');
+  await store.saveAnswers({School:'University of Houston'});
+  await store.saveQuestions([
+    {key:'university name',label:'University name*',type:'text',required:true,options:[],jobId:'2001',blocker:'missing_answer'},
+    {key:'school',label:'School',type:'unsupported',options:[],jobId:'2001',blocker:'operational',reason:'Unsupported control'}
+  ]);
+  const data=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.deepEqual(data.questions.map(question=>question.label),['School']);
+  assert.deepEqual(data.answerMemory.reusedAnswers,[{label:'University name*',company:'Example Company',answer:'University of Houston',sourceQuestion:'school'}]);
+  assert.equal(data.questions[0].company,'Example Company');
+});
+
+test('ambiguous graduation formats retain a reviewable prior answer',async t=>{
+  const {store,app}=await setup(t);
+  await store.saveAnswers({'Expected graduation':'Spring 2028'});
+  await store.saveQuestions([{key:'expected graduation date mm yyyy',label:'Expected graduation date (MM/YYYY)*',type:'text',required:true,options:[],blocker:'missing_answer'}]);
+  const data=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.equal(data.questions.length,1);
+  assert.equal(data.questions[0].answerKey,'expected graduation date mm yyyy');
+  assert.ok(data.questions[0].suggestions?.some(suggestion=>suggestion.question==='expected graduation'&&suggestion.answer==='Spring 2028'));
+});
+
+test('answer memory retains recent successful reuse provenance after pending questions are cleared',async t=>{
+  const {store,app}=await setup(t);
+  await store.saveAnswers({school:'Example University'});
+  const record=await store.createRecord({id:'2002',title:'Intern',company:'Example Company'},'ready');
+  await store.updateRecord(record.id,{answerMatches:[{label:'University name',company:'Example Company',answer:'Example University',sourceQuestion:'school'}]});
+  const data=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.equal(data.questions.length,0);
+  assert.deepEqual(data.answerMemory.reusedAnswers,[{label:'University name',company:'Example Company',answer:'Example University',sourceQuestion:'school'}]);
+});
+
+test('recognized future answers omit historical values whose saved source was deleted or changed',async t=>{
+  const {store,app}=await setup(t);
+  const record=await store.createRecord({id:'2003',title:'Intern',company:'Example'},'ready');
+  await store.updateRecord(record.id,{answerMatches:[{label:'University name',company:'Example',answer:'University of Houston',sourceQuestion:'school'}]});
+  await store.saveAnswers({school:'University of Houston'});
+  assert.equal((await (await fetch(app.url+'/api/bootstrap')).json()).answerMemory.reusedAnswers.length,1);
+  for(const answers of [{},{school:'Another University'}]){
+    await store.saveAnswers(answers);
+    const data=await (await fetch(app.url+'/api/bootstrap')).json();
+    assert.deepEqual(data.answerMemory.reusedAnswers,[]);
+    assert.equal((await store.getHistory())[0].answerMatches[0].answer,'University of Houston','History retains what was actually entered');
+  }
+});
+
+test('SMS consent is reused only for the employer explicitly selected by the user',async t=>{
+  const {store,app,send}=await setup(t);
+  const label='If you provided a phone number, do you consent to receiving follow-up communication via text message (or SMS message) regarding your application status?';
+  const key='if you provided a phone number do you consent to receiving follow up communication via text message or sms message regarding your application status';
+  const options=[{label:'Yes',value:'1'},{label:'No',value:'0'}];
+  for(const [id,company] of [['bge','BGE, Inc.'],['vilo','Vilo']])await store.createRecord({id,title:'Intern',company},'needs_answer');
+  await store.saveQuestions(['bge','vilo'].map(jobId=>({key,label,type:'radio',required:true,options,jobId,blocker:'missing_answer'})));
+  await store.saveAnswers({[label]:'Yes'});
+  const initial=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.equal(initial.questions.length,2,'Old unscoped consent requires review');
+  assert.equal(initial.questions.find(question=>question.jobId==='bge').answerKey,'sms consent for bge inc');
+  assert.ok(initial.questions.every(question=>question.suggestions.some(suggestion=>suggestion.answer==='Yes')));
+  assert.equal((await send('/api/answers',{...initial.answers,'sms consent for bge inc':'No'})).status,200);
+  const saved=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.deepEqual(saved.questions.map(question=>question.jobId),['vilo']);
+  assert.equal(saved.answerMemory.smsAnswers['BGE, Inc.'],'No');
+  assert.equal(saved.answerMemory.smsAnswers.Vilo,undefined);
+  assert.deepEqual(new Set(saved.answerMemory.employers),new Set(['BGE, Inc.','Vilo']));
+});
+
+test('SMS consent with an unidentified employer directs the user to LinkedIn rather than a futile Save control',async t=>{
+  const {store,app}=await setup(t);
+  const label='Do you consent to text message updates about your application?';
+  await store.saveQuestions([{label,key:'do you consent to text message updates about your application',type:'radio',required:true,company:'Company on LinkedIn',options:[{label:'Yes',value:'1'},{label:'No',value:'0'}],blocker:'missing_answer'}]);
+  await store.saveAnswers({[label]:'Yes'});
+  const data=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.equal(data.questions.length,1);
+  assert.equal(data.questions[0].type,'unsupported');
+  assert.equal(data.questions[0].blocker,'operational');
+  assert.equal(data.answerMemory.employers.includes('Company on LinkedIn'),false);
+});
+
 test('API normalizes bare profile URLs and invalid links leave saved settings intact',async t=>{
   const {app,send}=await setup(t);
   const response=await send('/api/config',{profile:{firstName:'Test',linkedinUrl:'www.linkedin.com/in/test-applicant',website:'portfolio.example/work'}});

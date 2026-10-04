@@ -368,3 +368,126 @@ test('browser: real résumé extraction populates selectable keywords on desktop
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:resolve('test-artifacts/resume-keywords-mobile.png'),fullPage:true});
 });
+
+async function answerMemoryPage(t,{answers={},questions=[],employers=[]}={}){
+  const {store,page}=await settingsPage(t);
+  await store.saveAnswers(answers);
+  if(questions.length)await store.saveQuestions(questions);
+  for(const [index,company] of employers.entries())await store.createRecord({id:String(1001+index),title:'Example role',company},'needs_answer');
+  await page.reload();await page.getByRole('button',{name:'Answers',exact:true}).click();
+  return {store,page};
+}
+
+const authorizationKey='are you legally authorized to work in the united states';
+const sponsorshipKey='will you now or in the future require sponsorship to work in the united states';
+
+test('browser: common questions save explicit authorization without choosing sponsorship or losing another draft',async t=>{
+  const {store,page}=await answerMemoryPage(t);
+  await page.getByText('Common questions',{exact:true}).click();
+  const authorization=page.getByLabel('Answer for Are you legally authorized to work in the United States?',{exact:true});
+  const sponsorship=page.getByLabel('Answer for Will you now or in the future require sponsorship to work in the United States?',{exact:true});
+  const school=page.getByLabel('Answer for School',{exact:true});
+  await authorization.waitFor();
+  assert.equal(await authorization.inputValue(),'');assert.equal(await sponsorship.inputValue(),'');
+  await school.fill('University of Houston');
+  await page.waitForResponse(response=>response.url().endsWith('/api/bootstrap'));
+  assert.equal(await school.inputValue(),'University of Houston');
+  await authorization.selectOption('No');
+  await authorization.locator('xpath=ancestor::article[1]').getByRole('button',{name:'Save this answer',exact:true}).click();
+  await page.getByText('Answer saved',{exact:true}).waitFor();
+  assert.equal((await store.getAnswers())[authorizationKey],'No');
+  assert.equal((await store.getAnswers())[sponsorshipKey],undefined);
+  assert.equal((await store.getAnswers()).school,undefined);
+  assert.equal(await school.inputValue(),'University of Houston');
+  assert.equal(await sponsorship.inputValue(),'');
+  await page.reload();await page.getByRole('button',{name:'Answers',exact:true}).click();
+  await page.getByText('Common questions',{exact:true}).click();
+  assert.equal(await authorization.inputValue(),'No');
+  assert.match(await authorization.locator('xpath=ancestor::article[1]').textContent(),/Saved from: are you legally authorized/);
+});
+
+test('browser: similar answer suggestions fill valid choices only and require explicit saving',async t=>{
+  const question={key:'preferred programming language',label:'Preferred programming language?',type:'select',options:[{label:'Python',value:'py'},{label:'C++',value:'cpp'}],jobId:'1001',company:'BGE, Inc.',blocker:'missing_answer'};
+  const {store,page}=await answerMemoryPage(t,{answers:{'favorite programming language':'Python','programming language used':'Java'},questions:[question]});
+  const card=page.locator('.pending-question').filter({has:page.getByRole('heading',{name:question.label,exact:true})});
+  await card.getByText('favorite programming language',{exact:true}).waitFor();
+  assert.match(await card.textContent(),/Python/);
+  const input=page.getByRole('combobox',{name:`Answer for ${question.label}`,exact:true});
+  await card.locator('.answer-suggestion').filter({hasText:'Java'}).getByRole('button',{name:'Use this answer',exact:true}).click();
+  await page.getByText('That answer is not one of the current choices',{exact:true}).waitFor();
+  assert.equal(await input.inputValue(),'');
+  await card.locator('.answer-suggestion').filter({hasText:'favorite programming language'}).getByRole('button',{name:'Use this answer',exact:true}).click();
+  assert.equal(await input.inputValue(),'Python');
+  assert.equal((await store.getAnswers())[question.key],undefined);
+  await page.waitForResponse(response=>response.url().endsWith('/api/bootstrap'));
+  assert.equal(await input.inputValue(),'Python');
+  await card.getByRole('button',{name:'Save this answer',exact:true}).click();
+  await page.getByText('Answer saved',{exact:true}).waitFor();
+  assert.equal((await store.getAnswers())[question.key],'Python');
+});
+
+test('browser: SMS consent starts blank and saves separately for the explicitly selected employer',async t=>{
+  const {store,page}=await answerMemoryPage(t,{answers:{'sms consent for bge inc':'No'},employers:['BGE, Inc.','Another Employer']});
+  const employer=page.getByLabel('Employer for text messages',{exact:true}),consent=page.getByLabel('Text message consent',{exact:true});
+  await employer.waitFor();
+  assert.equal(await employer.inputValue(),'');assert.equal(await consent.inputValue(),'');
+  await page.getByRole('button',{name:'Save text message consent',exact:true}).click();
+  await page.getByText('Choose an employer first',{exact:true}).waitFor();
+  await employer.selectOption('BGE, Inc.');assert.equal(await consent.inputValue(),'No');
+  await employer.selectOption('Another Employer');assert.equal(await consent.inputValue(),'');
+  await consent.selectOption('Yes');
+  await page.getByRole('button',{name:'Save text message consent',exact:true}).click();
+  await page.getByText('Text message consent saved for Another Employer',{exact:true}).waitFor();
+  assert.deepEqual(await store.getAnswers(),{'sms consent for bge inc':'No','sms consent for another employer':'Yes'});
+  await employer.selectOption('BGE, Inc.');assert.equal(await consent.inputValue(),'No');
+  await page.reload();await page.getByRole('button',{name:'Answers',exact:true}).click();
+  assert.equal(await employer.inputValue(),'');assert.equal(await consent.inputValue(),'');
+});
+
+test('browser: recognized answers show original question and employer as text on mobile',async t=>{
+  const {page}=await answerMemoryPage(t,{answers:{'field of study':'Computer Science/IT','university name':'University of Houston'},questions:[{label:'Major*',key:'major',type:'text',jobId:'1001',company:'BGE, Inc.',blocker:'missing_answer'},{label:'School*',key:'school',type:'text',jobId:'1002',company:'<img src=x onerror="window.injected=true">',blocker:'missing_answer'}]});
+  const recognized=page.getByRole('region',{name:'Recognized saved answers',exact:true});
+  await recognized.getByText('field of study',{exact:true}).waitFor();
+  assert.match(await recognized.textContent(),/Major\*/);assert.match(await recognized.textContent(),/Computer Science\/IT/);assert.match(await recognized.textContent(),/BGE, Inc\./);
+  assert.equal(await recognized.locator('img').count(),0);assert.equal(await page.evaluate(()=>window.injected),undefined);
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+});
+
+test('browser: a selected pending choice survives another question being answered in Common questions',async t=>{
+  const question={key:'preferred programming language',label:'Preferred programming language?',type:'select',options:[{label:'Python',value:'py'},{label:'C++',value:'cpp'}],jobId:'1001',company:'BGE, Inc.',blocker:'missing_answer'};
+  const authorizationQuestion={key:authorizationKey,label:'Are you legally authorized to work in the United States?',type:'radio',options:[{label:'Yes',value:'yes'},{label:'No',value:'no'}],jobId:'1001',company:'BGE, Inc.',blocker:'missing_answer'};
+  const {store,page}=await answerMemoryPage(t,{questions:[question,authorizationQuestion]});
+  const programming=page.getByRole('combobox',{name:`Answer for ${question.label}`,exact:true});
+  await programming.fill('Py');await page.getByRole('option',{name:'Python',exact:true}).click();
+  await page.getByText('Common questions',{exact:true}).click();
+  const common=page.locator('#common-questions'),authorization=common.getByLabel('Answer for Are you legally authorized to work in the United States?',{exact:true});
+  await authorization.selectOption('No');
+  await authorization.locator('xpath=ancestor::article[1]').getByRole('button',{name:'Save this answer',exact:true}).click();
+  await page.getByText('Answer saved',{exact:true}).waitFor();
+  assert.equal(await page.locator('#pending-questions').getByRole('heading',{name:authorizationQuestion.label,exact:true}).count(),0);
+  assert.equal(await programming.inputValue(),'Python');assert.equal((await store.getAnswers())[question.key],undefined);
+});
+
+test('browser: pending SMS answer saves the employer-specific key provided by bootstrap',async t=>{
+  const question={key:'do you consent to receiving sms messages about your application status',label:'Do you consent to receiving SMS messages about your application status?',type:'radio',options:[{label:'Yes',value:'yes'},{label:'No',value:'no'}],jobId:'1001',company:'BGE, Inc.',blocker:'missing_answer'};
+  const {store,page}=await answerMemoryPage(t,{questions:[question],answers:{'text message consent':'Yes'}});
+  const card=page.locator('.pending-question').filter({has:page.getByRole('heading',{name:question.label,exact:true})});
+  const input=page.getByLabel(`Answer for ${question.label}`,{exact:true});await input.waitFor();
+  await card.getByRole('button',{name:'Use this answer',exact:true}).click();
+  assert.equal(await input.inputValue(),'Yes');assert.equal((await store.getAnswers())['sms consent for bge inc'],undefined);
+  await card.getByRole('button',{name:'Save this answer',exact:true}).click();await page.getByText('Answer saved',{exact:true}).waitFor();
+  assert.equal((await store.getAnswers())['sms consent for bge inc'],'Yes');assert.equal((await store.getAnswers())[question.key],undefined);
+});
+
+test('browser: answer suggestions reject opaque option codes and repeated choice labels',async t=>{
+  const questions=[{key:'department preference',label:'Department preference*',type:'select',options:[{label:'IT',value:'1'},{label:'Marketing',value:'2'}],jobId:'1001',company:'BGE, Inc.',blocker:'missing_answer'}, {key:'location preference',label:'Location preference*',type:'select',options:[{label:'Houston, TX',value:'a'},{label:'Houston, TX',value:'b'}],jobId:'1001',company:'BGE, Inc.',blocker:'missing_answer'}];
+  const {store,page}=await answerMemoryPage(t,{answers:{'department preference':'1','location preference':'Houston, TX'},questions});
+  for(const question of questions){
+    const card=page.locator('.pending-question').filter({has:page.getByRole('heading',{name:question.label,exact:true})});
+    await card.getByRole('button',{name:'Use this answer',exact:true}).click();
+    await page.getByText('That answer is not one of the current choices',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('combobox',{name:`Answer for ${question.label}`,exact:true}).inputValue(),'');
+  }
+  assert.deepEqual(await store.getAnswers(),{'department preference':'1','location preference':'Houston, TX'});
+});

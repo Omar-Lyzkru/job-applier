@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {discoverFields,fillApplicationFields,validationErrors} from '../src/browser/forms.mjs';
 import {modernApplication} from './fixtures/modern-application.mjs';
+import {modernScreening,screeningLabels} from './fixtures/modern-screening.mjs';
 
 async function setup(t,scenario={}){
   const dir=await mkdtemp(join(tmpdir(),'job-applier-modern-form-'));
@@ -137,5 +138,244 @@ test('native checkbox overlays use their associated label and verify the explici
     const result=await fillApplicationFields(dialog,{...options,answers});
     assert.deepEqual(result,{questions:[],errors:[]});
     assert.equal(await dialog.locator('input[name=follow]').isChecked(),false);
+  }
+});
+
+test('similar saved answers fill covered BGE screening radios and retain their source',async t=>{
+  const {page,dialog,options,applicationState}=await setup(t);
+  await page.setContent(`<style>input[type=radio]{position:absolute;width:0;height:0;margin:0}</style><div role="dialog">
+    <fieldset><legend>Are you authorized to work legally in the US?*</legend><label><input name="work" type="radio" value="work-yes" required>Yes</label><label><input name="work" type="radio" value="work-no" required>No</label></fieldset>
+    <fieldset><legend>Will you now or anytime after graduation require sponsorship for a work visa (like an H1b) to work legally in the US?*</legend><label><input name="visa" type="radio" value="visa-yes" required>Yes</label><label><input name="visa" type="radio" value="visa-no" required>No</label></fieldset>
+    <fieldset><legend>If you provided a phone number, do you consent to receiving follow-up communication via text message (or SMS message) regarding your application status?*</legend><label><input name="sms" type="radio" value="sms-yes" required>Yes</label><label><input name="sms" type="radio" value="sms-no" required>No</label></fieldset>
+  </div>`);
+  const result=await fillApplicationFields(dialog,{...options,company:'BGE, Inc.',answers:{
+    'are you legally authorized to work in the united states':'Yes',
+    'will you now or in the future require sponsorship to work in the united states':'No',
+    'sms consent for bge inc':'No'
+  }});
+  assert.deepEqual(result,{questions:[],errors:[]});
+  assert.equal(await dialog.locator('input[value=work-yes]').isChecked(),true);
+  assert.equal(await dialog.locator('input[value=visa-no]').isChecked(),true);
+  assert.equal(await dialog.locator('input[value=sms-no]').isChecked(),true);
+  assert.ok(applicationState.answerMatches.some(match=>match.sourceQuestion==='are you legally authorized to work in the united states'&&match.answer==='Yes'));
+  assert.ok(applicationState.answerMatches.some(match=>match.sourceQuestion==='sms consent for bge inc'&&match.company==='BGE, Inc.'));
+});
+
+test('an unknown employer never inherits SMS consent saved for BGE',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent('<div role="dialog"><fieldset><legend>Do you consent to text message updates about your application?*</legend><label><input name="sms" type="radio" value="1" required>Yes</label><label><input name="sms" type="radio" value="0" required>No</label></fieldset></div>');
+  const result=await fillApplicationFields(dialog,{...options,company:'Another Company',answers:{'sms consent for bge inc':'Yes'}});
+  assert.equal(result.questions.length,1);
+  assert.equal(result.questions[0].answerKey,'sms consent for another company');
+  assert.equal(result.questions[0].company,'Another Company');
+  assert.equal(await dialog.locator('input:checked').count(),0);
+});
+
+test('a required date with different formatting returns the prior answer as a review suggestion',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent('<div role="dialog"><label>Expected graduation date (MM/YYYY)*<input name="graduation" required></label></div>');
+  const result=await fillApplicationFields(dialog,{...options,answers:{'expected graduation':'Spring 2028'}});
+  assert.equal(result.questions.length,1);
+  assert.ok(result.questions[0].suggestions?.some(suggestion=>suggestion.question==='expected graduation'&&suggestion.answer==='Spring 2028'));
+  assert.equal(await dialog.locator('input[name=graduation]').inputValue(),'');
+});
+
+test('radio choices with identical internal values select the displayed No answer',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent('<div role="dialog"><fieldset><legend>Are you legally authorized to work in the United States?*</legend><label><input name="work" type="radio" required>Yes</label><label><input name="work" type="radio" required>No</label></fieldset></div>');
+  const result=await fillApplicationFields(dialog,{...options,answers:{'are you legally authorized to work in the united states':'No'}});
+  assert.deepEqual(result,{questions:[],errors:[]});
+  assert.equal(await dialog.locator('label').filter({hasText:'No'}).locator('input').isChecked(),true);
+  assert.equal(await dialog.locator('label').filter({hasText:'Yes'}).locator('input').isChecked(),false);
+});
+
+test('select choices with identical internal values select the displayed No answer',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent('<div role="dialog"><label>Are you legally authorized to work in the United States?*<select name="work" required><option value="">Choose</option><option value="on">Yes</option><option value="on">No</option></select></label></div>');
+  const result=await fillApplicationFields(dialog,{...options,answers:{'are you legally authorized to work in the united states':'No'}});
+  assert.deepEqual(result,{questions:[],errors:[]});
+  assert.equal(await dialog.locator('select option:checked').textContent(),'No');
+});
+
+test('the native graduation input format is preserved for review even when its label has no format',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent('<div role="dialog"><label>Expected graduation*<input name="graduation" required pattern="[0-9]{2}/[0-9]{4}" placeholder="MM/YYYY"></label></div>');
+  const fields=await discoverFields(dialog);
+  assert.equal(fields[0].field.pattern,'[0-9]{2}/[0-9]{4}');
+  assert.equal(fields[0].field.placeholder,'MM/YYYY');
+  const result=await fillApplicationFields(dialog,{...options,answers:{'expected graduation':'Spring 2028'}});
+  assert.equal(result.questions.length,1);
+  assert.equal(result.questions[0].pattern,'[0-9]{2}/[0-9]{4}');
+  assert.ok(result.questions[0].suggestions.some(suggestion=>suggestion.answer==='Spring 2028'));
+  assert.equal(await dialog.locator('input').inputValue(),'');
+});
+
+test('hydrated screening groups discover the real required questions and sibling Yes/No choices',async t=>{
+  const {page,dialog}=await setup(t);
+  await page.setContent(modernScreening());
+  const fields=await discoverFields(dialog);
+  assert.equal(fields.length,3);
+  assert.deepEqual(fields.map(entry=>[entry.field.label,entry.field.type,entry.field.required]),screeningLabels.map(label=>[`${label}*`,'radio',true]));
+  for(const entry of fields)assert.deepEqual(entry.field.options.map(({label,value})=>({label,value})),[{label:'Yes',value:'on'},{label:'No',value:'on'}]);
+  assert.equal(await dialog.locator('input').first().isVisible(),false);
+});
+
+test('unanswered hydrated screening returns three real questions instead of generated or unnamed fields',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent(modernScreening());
+  const result=await fillApplicationFields(dialog,{...options,company:'BGE, Inc.'});
+  assert.deepEqual(result.errors,[]);
+  assert.equal(result.questions.length,3);
+  assert.deepEqual(result.questions.map(question=>[question.label,question.type,question.blocker]),screeningLabels.map(label=>[`${label}*`,'radio','missing_answer']));
+  assert.equal(result.questions[2].answerKey,'sms consent for bge inc');
+  assert.equal(await dialog.locator('input:checked').count(),0);
+});
+
+test('hydrated screening fills explicit saved legal and employer consent answers through the exact empty label',async t=>{
+  const {page,dialog,options,applicationState}=await setup(t);
+  await page.setContent(modernScreening());
+  const result=await fillApplicationFields(dialog,{...options,company:'BGE, Inc.',answers:{
+    'are you legally authorized to work in the united states':'Yes',
+    'will you now or in the future require sponsorship to work in the united states':'No',
+    'sms consent for bge inc':'No'
+  }});
+  assert.deepEqual(result,{questions:[],errors:[]});
+  assert.deepEqual(await dialog.locator('input:checked').evaluateAll(inputs=>inputs.map(input=>input.id)),['choice-0-0','choice-1-1','choice-2-1']);
+  assert.deepEqual(applicationState.answerMatches.map(match=>match.sourceQuestion),[
+    'are you legally authorized to work in the united states',
+    'will you now or in the future require sponsorship to work in the united states',
+    'sms consent for bge inc'
+  ]);
+});
+
+test('ambiguous hydrated choices remain a named required blocker without selecting a radio',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent(modernScreening());
+  await dialog.locator('fieldset').first().locator('p').nth(1).evaluate(el=>{el.textContent='Yes';});
+  const result=await fillApplicationFields(dialog,{...options,company:'BGE, Inc.',answers:{
+    'are you legally authorized to work in the united states':'Yes',
+    'will you now or in the future require sponsorship to work in the united states':'No',
+    'sms consent for bge inc':'No'
+  }});
+  assert.equal(result.questions.length,1);
+  assert.equal(result.questions[0].label,`${screeningLabels[0]}*`);
+  assert.equal(result.questions[0].type,'unsupported');
+  assert.equal(result.questions[0].required,true);
+  assert.equal(await dialog.locator('fieldset').first().locator('input:checked').count(),0);
+});
+
+test('mixed custom and native hydrated groups remain unsupported with their required question',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent(modernScreening());
+  await dialog.locator('fieldset').first().evaluate(group=>group.insertAdjacentHTML('beforeend','<div role="radio" aria-checked="false">Other</div>'));
+  const result=await fillApplicationFields(dialog,{...options,company:'BGE, Inc.',answers:{
+    'are you legally authorized to work in the united states':'Yes',
+    'will you now or in the future require sponsorship to work in the united states':'No',
+    'sms consent for bge inc':'No'
+  }});
+  assert.equal(result.questions.length,1);
+  assert.equal(result.questions[0].label,`${screeningLabels[0]}*`);
+  assert.equal(result.questions[0].type,'unsupported');
+  assert.equal(await dialog.locator('fieldset').first().locator('input:checked').count(),0);
+});
+
+test('hydrated fallback does not override a conflicting explicit group question',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent(modernScreening());
+  await dialog.locator('fieldset').first().evaluate(group=>group.setAttribute('aria-label','Are you legally authorized to work in Canada?*'));
+  const result=await fillApplicationFields(dialog,{...options,company:'BGE, Inc.',answers:{
+    'are you legally authorized to work in the united states':'Yes',
+    'will you now or in the future require sponsorship to work in the united states':'No',
+    'sms consent for bge inc':'No'
+  }});
+  assert.equal(await dialog.locator('fieldset').first().locator('input:checked').count(),0);
+  assert.ok(result.questions.some(question=>question.label==='Are you legally authorized to work in Canada?*'));
+});
+
+test('hydrated native radios retain the group aria-required flag without a visible star',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent(modernScreening());
+  await dialog.locator('fieldset').first().evaluate(group=>{
+    group.setAttribute('aria-required','true');
+    group.previousElementSibling.textContent=group.previousElementSibling.textContent.replace(/\*$/,'');
+  });
+  const result=await fillApplicationFields(dialog,{...options,company:'BGE, Inc.',answers:{
+    'will you now or in the future require sponsorship to work in the united states':'No',
+    'sms consent for bge inc':'No'
+  }});
+  assert.equal(result.questions.length,1);
+  assert.equal(result.questions[0].label,screeningLabels[0]);
+  assert.equal(result.questions[0].required,true);
+});
+
+test('conflicting linked choice labels keep the hydrated group unsupported',async t=>{
+  const {page,dialog}=await setup(t);
+  await page.setContent(modernScreening());
+  await dialog.evaluate(root=>root.insertAdjacentHTML('beforeend','<label for="choice-0-0">Yes</label><label for="choice-0-0">No</label>'));
+  const fields=await discoverFields(dialog);
+  assert.equal(fields[0].field.type,'unsupported');
+  assert.equal(fields[0].field.label,`${screeningLabels[0]}*`);
+});
+
+test('two hydrated questions cannot share one native radio name and hide a required field',async t=>{
+  const {page,dialog}=await setup(t);
+  await page.setContent(modernScreening());
+  await dialog.locator('fieldset').nth(1).locator('input').evaluateAll(inputs=>inputs.forEach(input=>{input.name='radio-group-_r_0_';}));
+  const fields=await discoverFields(dialog);
+  assert.ok(fields.some(entry=>entry.field.type==='unsupported'&&entry.field.label===`${screeningLabels[0]}*`));
+  assert.ok(fields.some(entry=>entry.field.type==='unsupported'&&entry.field.label===`${screeningLabels[1]}*`));
+});
+
+test('an unrecognized résumé chooser cannot become an ordinary saved-answer screening question',async t=>{
+  const {page,dialog}=await setup(t);
+  await page.setContent(modernScreening());
+  await dialog.locator('fieldset').first().evaluate(group=>{
+    group.previousElementSibling.textContent='Resume*';
+    group.querySelectorAll('input').forEach(input=>input.setAttribute('aria-label','Resume'));
+    group.querySelectorAll('p').forEach((text,index)=>{text.textContent=index?'other-resume.pdf':'old-resume.pdf';});
+    group.insertAdjacentHTML('afterend','<button type="button">Upload resume</button>');
+  });
+  const fields=await discoverFields(dialog);
+  assert.equal(fields[0].field.type,'unsupported');
+  assert.equal(fields[0].field.label,'Resume*');
+});
+
+test('unsupported hydrated choices retain native required flags even without a heading star',async t=>{
+  const {page,dialog,options}=await setup(t);
+  await page.setContent(modernScreening());
+  await dialog.locator('fieldset').first().evaluate(group=>{
+    group.previousElementSibling.textContent=group.previousElementSibling.textContent.replace(/\*$/,'');
+    group.querySelectorAll('input').forEach(input=>{input.required=true;});
+    group.querySelectorAll('p').forEach(text=>{text.textContent='Yes';});
+  });
+  const result=await fillApplicationFields(dialog,{...options,company:'BGE, Inc.',answers:{
+    'are you legally authorized to work in the united states':'Yes',
+    'will you now or in the future require sponsorship to work in the united states':'No',
+    'sms consent for bge inc':'No'
+  }});
+  assert.equal(result.questions.length,1);
+  assert.equal(result.questions[0].type,'unsupported');
+  assert.equal(result.questions[0].label,screeningLabels[0]);
+  assert.equal(result.questions[0].required,true);
+});
+
+test('other mandatory custom widgets make the hydrated native group unsupported without losing required flags',async t=>{
+  const {page,dialog,options}=await setup(t);
+  for(const attributes of ['role="checkbox"','role="combobox"','role="textbox"','contenteditable="true"']){
+    await page.setContent(modernScreening());
+    await dialog.locator('fieldset').first().evaluate((group,attributes)=>{
+      group.previousElementSibling.textContent=group.previousElementSibling.textContent.replace(/\*$/,'');
+      group.insertAdjacentHTML('beforeend',`<div ${attributes} aria-required="true" aria-label="Additional required control"></div>`);
+    },attributes);
+    const result=await fillApplicationFields(dialog,{...options,company:'BGE, Inc.',answers:{
+      'are you legally authorized to work in the united states':'Yes',
+      'will you now or in the future require sponsorship to work in the united states':'No',
+      'sms consent for bge inc':'No'
+    }});
+    assert.equal(result.questions.length,1,attributes);
+    assert.equal(result.questions[0].type,'unsupported',attributes);
+    assert.equal(result.questions[0].label,screeningLabels[0],attributes);
+    assert.equal(result.questions[0].required,true,attributes);
+    assert.equal(await dialog.locator('fieldset').first().locator('input:checked').count(),0,attributes);
   }
 });

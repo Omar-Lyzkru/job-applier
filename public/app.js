@@ -5,6 +5,8 @@ const profileKeys=['firstName','lastName','email','phone','city','state','postal
 const resultNames={submitted:'Submitted',unconfirmed:'Unconfirmed',submission_pending:'Submission pending',needs_answer:'Needs answer',ready:'Ready — dry run',skipped:'Skipped',failed:'Failed'};
 const pageCopy={dashboard:['Your application workspace','Find matching jobs and apply using your saved profile.'],settings:['Set up your next search','Your profile, résumé, and preferences for the next run.'],answers:['Saved answers','Your answers to the questions employers ask.'],history:['Application history','A record of what was submitted, skipped, or needs attention.']};
 let state=null,ready=false,busy=false,view='dashboard',toastTimer,questionSignature='',answerSignature='',controlId=0,committedCountry='';
+let commonSignature='',recognizedSignature='',smsEmployersSignature='';
+const answerDrafts=new Map();
 let recommendationResume=null,recommendationLoading=false,recommendationRequest=0;
 const create=(tag,className,text)=>{const element=document.createElement(tag);if(className)element.className=className;if(text!==undefined)element.textContent=String(text);return element;};
 function setView(next){
@@ -172,7 +174,7 @@ function searchableAnswer(text,options){
   field.append(group);group.append(input,toggle,list);
   let matches=labels,active=-1;
   const close=()=>{list.hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');active=-1;};
-  const choose=label=>{input.value=label;input.focus();close();};
+  const choose=label=>{input.value=label;input.dispatchEvent(new Event('change',{bubbles:true}));input.focus();close();};
   const show=()=>{
     const query=input.value.trim().toLocaleLowerCase();matches=labels.filter(label=>label.toLocaleLowerCase().includes(query));active=-1;
     input.removeAttribute('aria-activedescendant');list.replaceChildren();
@@ -197,38 +199,103 @@ function searchableAnswer(text,options){
   });
   return {input,field,choice:()=>labels.find(label=>label.toLocaleLowerCase()===input.value.trim().toLocaleLowerCase())};
 }
+const answerText=value=>typeof value==='boolean'?(value?'Yes':'No'):String(value??'');
+function matchChoice(options,value){
+  const text=answerText(value).trim().toLocaleLowerCase(),available=options.filter(option=>option.value!=='');
+  const labels=available.filter(option=>option.label.toLocaleLowerCase()===text);return labels.length===1?labels[0].label:undefined;
+}
+function answerEditor(question,draftKey,savedValue=''){
+  const options=question.type==='checkbox'?[{label:'Yes',value:'yes'},{label:'No',value:'no'}]:question.options;
+  const searchable=question.type==='select'&&options?.length?searchableAnswer(`Answer for ${question.label}`,options):null;
+  const input=searchable?.input||create(options?.length?'select':'input');
+  if(input.tagName==='SELECT'){
+    const placeholder=create('option',null,'Choose an answer');placeholder.value='';input.append(placeholder);
+    for(const option of options){if(option.value==='')continue;const choice=create('option',null,option.label);choice.value=option.label;input.append(choice);}
+  }
+  const initial=answerDrafts.has(draftKey)?answerDrafts.get(draftKey):options?.length?(matchChoice(options,savedValue)||''):answerText(savedValue);
+  input.value=initial;input.addEventListener('input',()=>answerDrafts.set(draftKey,input.value));input.addEventListener('change',()=>answerDrafts.set(draftKey,input.value));
+  const row=create('div',searchable?'answer-row searchable-row':'answer-row'),button=create('button','button primary answer-action','Save this answer');button.type='button';
+  button.addEventListener('click',()=>{
+    const value=options?.length?matchChoice(options,input.value):input.value.trim();
+    if(!value){toast(searchable?'Choose an answer from the list':'Enter an answer first',true);return;}
+    perform(async()=>{await api('/api/answers',{...state.answers,[question.answerKey||question.key]:value});answerDrafts.delete(draftKey);},'Answer saved');
+  });
+  row.append(searchable?.field||inputLabel(`Answer for ${question.label}`,input),button);
+  return {row,input,set(value){
+    const text=options?.length?matchChoice(options,value):answerText(value);
+    if(text===undefined){toast('That answer is not one of the current choices',true);return;}
+    input.value=text;answerDrafts.set(draftKey,text);input.focus();
+  }};
+}
+function appendSuggestions(card,suggestions,editor){
+  if(!suggestions?.length)return;
+  const group=create('div','answer-suggestions');group.append(create('p','answer-memory-help','Previous answers to review. Confirm that the meaning is the same before saving.'));
+  for(const suggestion of suggestions){
+    const item=create('div','answer-suggestion');item.append(create('b',null,suggestion.question),create('p','suggestion-answer',answerText(suggestion.answer)));
+    if(suggestion.reason)item.append(create('p',null,suggestion.reason));
+    const use=create('button','button answer-action','Use this answer');use.type='button';use.addEventListener('click',()=>editor.set(suggestion.answer));item.append(use);group.append(item);
+  }
+  card.append(group);
+}
 function renderQuestions(){
   const signature=JSON.stringify(state.questions);if(signature===questionSignature)return;questionSignature=signature;
   const fragment=document.createDocumentFragment();
   for(const question of state.questions){
     const card=create('article','pending-question');card.append(create('h3',null,question.label));
     const job=state.history.find(record=>record.job.id===question.jobId)?.job;
-    const context=create('p');if(job){context.append(jobAnchor(job,'question-job'));context.append(document.createTextNode(` · ${job.company}`));}else context.textContent='Question from a LinkedIn application';card.append(context);
+    const context=create('p');if(job){context.append(jobAnchor(job,'question-job'));context.append(document.createTextNode(` · ${question.company||job.company}`));}else context.textContent=question.company?`Question from ${question.company}`:'Question from a LinkedIn application';card.append(context);
     if(question.reason)card.append(create('p',null,question.reason));
     if(question.type==='unsupported'){card.append(create('p',null,'Complete this control directly in LinkedIn. The app cannot enter it automatically.'));fragment.append(card);continue;}
-    const searchable=question.type==='select'&&question.options?.length?searchableAnswer(`Answer for ${question.label}`,question.options):null;
-    const input=searchable?.input||create(question.options?.length||question.type==='checkbox'?'select':'input');
-    if(input.tagName==='SELECT'){
-      const placeholder=create('option',null,'Choose an answer');placeholder.value='';input.append(placeholder);
-      const options=question.type==='checkbox'?[{label:'Yes',value:'yes'},{label:'No',value:'no'}]:question.options;
-      for(const option of options){if(option.value==='')continue;const choice=create('option',null,option.label);choice.value=option.label;input.append(choice);}
-    }
-    const row=create('div',searchable?'answer-row searchable-row':'answer-row'),button=create('button','button primary answer-action','Save this answer');button.type='button';
-    button.addEventListener('click',()=>{const value=searchable?searchable.choice():input.value.trim();if(!value){toast(searchable?'Choose an answer from the list':'Enter an answer first',true);return;}perform(()=>api('/api/answers',{...state.answers,[question.key]:value}),'Answer saved');});
-    row.append(searchable?.field||inputLabel(`Answer for ${question.label}`,input),button);card.append(row);fragment.append(card);
+    const editor=answerEditor(question,`pending:${question.answerKey||question.key}`);appendSuggestions(card,question.suggestions,editor);card.append(editor.row);fragment.append(card);
   }
   byId('pending-questions').replaceChildren(fragment);byId('questions-empty').hidden=state.questions.length>0;
+}
+function renderCommonQuestions(){
+  const questions=state.answerMemory?.commonQuestions||[],signature=JSON.stringify(questions);if(signature===commonSignature)return;commonSignature=signature;
+  const fragment=document.createDocumentFragment();
+  for(const question of questions){
+    const card=create('article','common-question'),heading=create('h3',null,question.label);card.append(heading);
+    if(question.help)card.append(create('p','answer-memory-help',question.help));
+    if(question.status==='saved'){
+      const source=create('p','answer-provenance','Saved from: ');source.append(create('span',null,question.sourceQuestion||question.label));card.append(source);
+    }else card.append(create('p','answer-memory-help',question.status==='review'?'Review previous answers before choosing.':'No answer saved. Choose your own answer.'));
+    const editor=answerEditor(question,`common:${question.key}`,question.status==='saved'?question.answer:'');appendSuggestions(card,question.suggestions,editor);card.append(editor.row);fragment.append(card);
+  }
+  byId('common-questions').replaceChildren(fragment);byId('common-questions-empty').hidden=questions.length>0;
+}
+function smsAnswerKey(company){return `sms consent for ${company.normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim()}`;}
+function updateSmsChoice(){
+  const company=byId('sms-employer').value,key=company?`sms:${smsAnswerKey(company)}`:'',saved=state?.answerMemory?.smsAnswers?.[company];
+  byId('sms-consent').value=company?(answerDrafts.has(key)?answerDrafts.get(key):matchChoice([{label:'Yes',value:'yes'},{label:'No',value:'no'}],saved)||''):'';
+  byId('sms-status').textContent=!company?'Select an employer to review or save your choice.':saved!==undefined?`Saved for ${company}: ${answerText(saved)}`:`No text message consent saved for ${company}.`;
+}
+function renderSmsConsent(){
+  const employers=state.answerMemory?.employers||[],signature=JSON.stringify(employers);
+  if(signature!==smsEmployersSignature){
+    smsEmployersSignature=signature;const select=byId('sms-employer'),selected=select.value,placeholder=create('option',null,'Choose an employer');placeholder.value='';
+    select.replaceChildren(placeholder,...employers.map(company=>{const option=create('option',null,company);option.value=company;return option;}));select.value=employers.includes(selected)?selected:'';
+  }
+  updateSmsChoice();
+}
+function renderRecognizedAnswers(){
+  const answers=state.answerMemory?.reusedAnswers||[],signature=JSON.stringify(answers);if(signature===recognizedSignature)return;recognizedSignature=signature;
+  const fragment=document.createDocumentFragment();
+  for(const answer of answers){
+    const card=create('article','recognized-answer');card.append(create('h3',null,answer.label));if(answer.company)card.append(create('p','answer-memory-help',answer.company));
+    card.append(create('p','recognized-value',answerText(answer.answer)));const source=create('p','answer-provenance','Saved from: ');source.append(create('span',null,answer.sourceQuestion));card.append(source);fragment.append(card);
+  }
+  byId('recognized-answers').replaceChildren(fragment);byId('recognized-empty').hidden=answers.length>0;
 }
 function renderLibrary(){
   const signature=JSON.stringify(state.answers);if(signature===answerSignature)return;answerSignature=signature;
   const entries=Object.entries(state.answers).sort(([a],[b])=>a.localeCompare(b)),fragment=document.createDocumentFragment();
   for(const [key,value] of entries){
-    const card=create('article','library-answer'),input=create('input');input.value=String(value);
+    const card=create('article','library-answer'),input=create('input'),draftKey=`library:${key}`;input.value=answerDrafts.has(draftKey)?answerDrafts.get(draftKey):String(value);input.addEventListener('input',()=>answerDrafts.set(draftKey,input.value));
     const row=create('div','answer-row'),save=create('button','button answer-action','Update answer');save.type='button';
-    save.addEventListener('click',()=>{if(!input.value.trim()){toast('Enter an answer first',true);return;}perform(()=>api('/api/answers',{...state.answers,[key]:input.value.trim()}),'Answer saved');});
+    save.addEventListener('click',()=>{if(!input.value.trim()){toast('Enter an answer first',true);return;}perform(async()=>{await api('/api/answers',{...state.answers,[key]:input.value.trim()});answerDrafts.delete(draftKey);},'Answer saved');});
     row.append(inputLabel(`Answer for ${key}`,input),save);card.append(row);
     const remove=create('button','text-button delete-answer answer-action','Delete answer');remove.type='button';remove.setAttribute('aria-label',`Delete answer for ${key}`);
-    remove.addEventListener('click',()=>perform(()=>{const next={...state.answers};delete next[key];return api('/api/answers',next);},'Answer deleted'));
+    remove.addEventListener('click',()=>perform(async()=>{const next={...state.answers};delete next[key];await api('/api/answers',next);answerDrafts.delete(draftKey);},'Answer deleted'));
     card.append(remove);fragment.append(card);
   }
   byId('answer-library').replaceChildren(fragment);byId('library-empty').hidden=entries.length>0;
@@ -249,7 +316,7 @@ function render(){
   byId('resume-step').classList.toggle('complete',Boolean(config.resume));
   byId('resume-name').textContent=config.resume?.filename||'No résumé uploaded';byId('resume-detail').textContent=config.resume?`${Math.ceil(config.resume.size/1000)} KB · ready to use`:'PDF, DOC, or DOCX · up to 2 MB';
   if((config.resume?.path||'')!==recommendationResume)clearRecommendations(config.resume);
-  renderHistory();renderQuestions();renderLibrary();syncControls();
+  renderHistory();renderQuestions();renderCommonQuestions();renderSmsConsent();renderRecognizedAnswers();renderLibrary();syncControls();
 }
 async function refresh(){
   state=await api('/api/bootstrap');const first=!ready;ready=true;if(first)fillSettings();render();
@@ -289,6 +356,13 @@ byId('answer-form').addEventListener('submit',event=>{
   event.preventDefault();const question=byId('new-question').value.trim(),answer=byId('new-answer').value.trim();
   if(!question||!answer){toast('Enter both the question and answer',true);return;}
   perform(async()=>{await api('/api/answers',{...state.answers,[question]:answer});byId('new-question').value='';byId('new-answer').value='';},'Answer saved');
+});
+byId('sms-employer').addEventListener('change',updateSmsChoice);
+byId('sms-consent').addEventListener('change',()=>{const company=byId('sms-employer').value;if(company)answerDrafts.set(`sms:${smsAnswerKey(company)}`,byId('sms-consent').value);});
+byId('save-sms-consent').addEventListener('click',()=>{
+  const company=byId('sms-employer').value,value=byId('sms-consent').value;
+  if(!company){toast('Choose an employer first',true);return;}if(!value){toast('Choose your text message consent first',true);return;}
+  perform(async()=>{await api('/api/answers',{...state.answers,[smsAnswerKey(company)]:value});answerDrafts.delete(`sms:${smsAnswerKey(company)}`);},`Text message consent saved for ${company}`);
 });
 syncControls();refresh().catch(error=>{byId('activity-message').textContent='Cannot reach the local app. Keep its terminal running, then refresh this page.';toast(error.message,true);});
 setInterval(()=>{if(!busy)refresh().catch(()=>{byId('state-label').textContent='Offline';});},2500);

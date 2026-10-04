@@ -1,13 +1,14 @@
 import {createServer} from 'node:http';
 
 export async function startFixture(scenario='success') {
-  const state={events:[],submissions:[],searches:[],fields:null};
+  const state={events:[],submissions:[],reviews:[],searches:[],fields:null};
   const server=createServer(async(req,res)=> {
     const url=new URL(req.url,'http://localhost');
     if (url.pathname==='/events') {
       const chunks=[]; for await (const chunk of req) chunks.push(chunk);
       const event=JSON.parse(Buffer.concat(chunks).toString());
       if (event.kind==='submit') {state.events.push('submit'); state.submissions.push(event.fields); state.fields=event.fields;}
+      if(event.kind==='review'){state.reviews.push(event.fields);state.fields=event.fields;}
       if(event.kind==='reminder-continue'||event.kind==='reminder-review')state.events.push(event.kind);
       res.writeHead(200,{'Content-Type':'application/json'}); res.end('{}'); return;
     }
@@ -89,6 +90,7 @@ export async function startFixture(scenario='success') {
         const close='<button aria-label="Dismiss" id="dismiss">×</button>';
         if(scenario==='limit'){dialog.innerHTML=close+'<p>You have reached the daily application limit. Please try again tomorrow.</p>';}
         else if(n===1)dialog.innerHTML=close+'<h2>Contact information</h2><label>First name<input name="first" required></label><label>Last name<input name="last" required></label><label>Email address<input name="email" type="email" required></label><label>Phone number<input name="phone" type="tel" required></label><label>Resume<input name="resume" type="file" accept=".pdf,.doc,.docx" required></label><label>Previous employer<textarea name="previous">Unknown company</textarea></label><button id="advance">Next</button>';
+        else if(n===2 && scenario==='answer-memory')dialog.innerHTML=close+'<h2>Additional questions</h2><label>University name*<input name="school" required></label><label>Are you authorized to work legally in the US?*<select name="authorized" required><option value="">Choose</option><option value="1">Yes</option><option value="0">No</option></select></label><fieldset><legend>Will you now or anytime after graduation require sponsorship for a work visa (like an H1b) to work legally in the US?*</legend><label><input name="sponsorship" type="radio" value="1" required>Yes</label><label><input name="sponsorship" type="radio" value="0" required>No</label></fieldset><label>Do you consent to text message updates about your application?*<select name="sms" required><option value="">Choose</option><option value="1">Yes</option><option value="0">No</option></select></label><button id="advance">Review</button>';
         else if(n===2)dialog.innerHTML=close+'<h2>Screening questions</h2><label>Years of Java experience<input name="years" type="number" required></label><label>Are you authorized to work in this country?<select name="authorized" required><option value="">Select an option</option><option value="1">Yes</option><option value="0">No</option></select></label><fieldset><legend>Are you willing to relocate?</legend><label><input type="radio" name="relocate" value="yes" required>Yes</label><label><input type="radio" name="relocate" value="no" required>No</label></fieldset><label><input name="consent" type="checkbox" required>I agree to share this information</label><label><input name="follow" type="checkbox" checked>Follow company</label><button id="advance">Review</button>';
         else dialog.innerHTML=close+'<h2>Review your application</h2><pre>'+escape(JSON.stringify(values))+'</pre><button id="submit">Submit application</button>';
         if(['page-progress','page-progress-busy','upload-progress','indeterminate-progress','unrelated-page-counter'].includes(scenario)){
@@ -126,7 +128,7 @@ export async function startFixture(scenario='success') {
         if(n===2 && scenario==='custom-listbox')dialog.querySelector('#advance').insertAdjacentHTML('beforebegin','<div role="listbox" aria-label="Citizenship" tabindex="0"><div role="option" aria-selected="true">Citizen<input type="text" value="citizen" style="display:none"></div></div>');
         if(n===2 && scenario==='custom-combobox')dialog.querySelector('#advance').insertAdjacentHTML('beforebegin','<div role="combobox" aria-label="Citizenship" tabindex="0" aria-expanded="false">Citizen<input type="hidden" value="citizen"></div>');
         dialog.querySelector('#dismiss').onclick=dismiss;
-        dialog.querySelector('#advance')?.addEventListener('click',()=>{collect();step(n+1);});
+        dialog.querySelector('#advance')?.addEventListener('click',async()=>{collect();if(scenario==='answer-memory'&&n===2)await fetch('/events',{method:'POST',body:JSON.stringify({kind:'review',fields:values})});step(n+1);});
         dialog.querySelector('#submit')?.addEventListener('click',async(event)=>{
           event.target.disabled=true;
           await fetch('/events',{method:'POST',body:JSON.stringify({kind:'submit',fields:values})});

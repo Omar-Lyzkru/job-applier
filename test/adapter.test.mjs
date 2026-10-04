@@ -178,6 +178,27 @@ test('browser: multistep explicit answers and selected resume precede one confir
   assert.equal(fixture.state.fields.resumeContent,'%PDF-1.4\nfixture');
 });
 
+test('browser: answer memory carries employer context through a dry run and records actual reused answers',async t=>{
+  const saved={school:'University of Houston','are you legally authorized to work in the united states':'Yes','will you now or in the future require sponsorship to work in the united states':'No','sms consent for bge inc':'No'};
+  for(const company of ['BGE, Inc.','Another Company']){
+    const {adapter,fixture,options}=await setup(t,'answer-memory');
+    const result=await adapter.apply({...job,company},{...options,answers:saved,dryRun:true});
+    assert.equal(result.status,company==='BGE, Inc.'?'ready':'needs_answer',JSON.stringify(result));
+    assert.equal(fixture.state.submissions.length,0);
+    assert.deepEqual(fixture.state.events,[],'Dry-run memory never invokes the submission guard');
+    assert.ok(result.answerMatches.some(match=>match.sourceQuestion==='school'&&match.company===company&&match.answer==='University of Houston'));
+    if(company==='BGE, Inc.'){
+      assert.equal(fixture.state.fields.authorized,'1');
+      assert.equal(fixture.state.fields.sponsorship,'0');
+      assert.equal(fixture.state.fields.sms,'0');
+      assert.ok(result.answerMatches.some(match=>match.sourceQuestion==='sms consent for bge inc'));
+    }else{
+      assert.equal(result.pendingQuestions.length,1);
+      assert.equal(result.pendingQuestions[0].answerKey,'sms consent for another company');
+    }
+  }
+});
+
 test('browser: delayed same-filename upload waits for acceptance and selects the new document',async t=>{
   const {adapter,fixture,options}=await setup(t,'delayed-upload');
   const result=await adapter.apply(job,options);

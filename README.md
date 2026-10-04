@@ -24,7 +24,7 @@ Open [the dashboard](http://127.0.0.1:3210). Keep the terminal running while you
 2. Upload the résumé you want employers to receive: PDF, DOC, or DOCX, up to 2 MB. Each local upload keeps its original filename in a separate folder. The LinkedIn upload adds a unique suffix to the filename, allowing the app to verify that the new document was accepted and selected even when a previous résumé had the same name.
 3. In **Dashboard**, choose **Open LinkedIn**. Sign in directly in that browser window; the app preserves this separate browser session.
 4. Turn on **Dry run (no submissions)** for a first check, then choose **Start dry run**. Supported forms stop at review. Results say **Ready — dry run**.
-5. Review **Answers** for missing screening questions and save explicit answers. Use the exact question text, or select an offered choice. Your résumé is never used to guess screening answers.
+5. In **Answers**, open **Common questions** to save recurring education and screening answers before a run. Review any missing questions and select an offered choice where available. Your résumé is never used to guess screening answers.
 6. Turn off Dry run and choose **Start applying** to submit supported applications automatically.
 
 Profile, answer, and résumé edits take effect in the next run. **Stop** prevents further applications and waits for any submission already in flight to settle.
@@ -57,6 +57,10 @@ Company-site applications are skipped. Changed layouts, unsupported controls, si
 Résumé uploads support both file fields and LinkedIn's newer **Upload resume** chooser. The app uses a unique filename to verify that the freshly uploaded document was accepted and selected. An older document with the same original filename cannot satisfy that check.
 
 In **Answers**, choice questions such as **Phone country code** let you type to filter the offered choices and view the matching list. Click a choice or use the arrow keys and Enter, then **Save this answer**. Exact typed labels also save; partial names must be selected from the list. The saved answer uses LinkedIn's displayed label rather than its internal option value.
+
+**Common questions** includes school, degree, major, graduation, position, location, department, address, US work authorization, and US visa sponsorship. The app reuses your saved answers for recognized equivalent wording and shows the original saved question. Work authorization and sponsorship remain separate. Conflicting answers, uncertain wording, unavailable choices, and incompatible graduation date formats need your review. A suggested answer is saved only after you choose it and press Save.
+
+**Text message consent** is saved separately for each employer. Choose an employer and explicitly answer Yes or No; neither is selected for you. Consent for application updates does not answer a differently worded marketing, calling, or negative consent question. Unknown employers require completion directly in LinkedIn.
 
 The completed-run message reports jobs checked, submission attempts, confirmed submissions, jobs needing answers, and skips. Finding a job does not count as applying: an attempt begins when the app reserves its submission, and **Submitted** requires LinkedIn confirmation. If every checked job is skipped and keyword filters rejected jobs, the message points you to review those filters.
 

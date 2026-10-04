@@ -92,3 +92,241 @@ test('any-keyword matching accepts an alternative skill and still applies exclus
   assert.equal(matchesJob('Marketing internship',search),false);
   assert.equal(matchesJob('Marketing internship',{...search,includeKeywords:[]}),true);
 });
+
+const yesNo=[{label:'Yes',value:'yes-option'},{label:'No',value:'no-option'}];
+
+test('filled answers explain the exact saved question or profile source',()=>{
+  const exact=resolveAnswer({label:'Years of Java experience *',type:'number'}, {}, {'years of java experience':0});
+  assert.equal(exact.answer,0);
+  assert.equal(exact.sourceQuestion,'years of java experience');
+  assert.equal(exact.match,'exact');
+  const profile=resolveAnswer({label:'Email address',type:'email'},{email:'me@example.com'},{});
+  assert.equal(profile.answer,'me@example.com');
+  assert.equal(profile.sourceQuestion,'email address');
+  assert.equal(profile.match,'profile');
+});
+
+test('known education aliases reuse previous answers with the source question',()=>{
+  const cases=[
+    ['University name','school','University of Houston'],
+    ['Field of study','major','Computer Science/IT'],
+    ['Degree','degree type',"Bachelor's Degree"],
+    ['Expected graduation date','expected graduation','Spring 2028'],
+    ['Type of position desired','desired position type','Internship'],
+    ['Preferred department','department preference','IT'],
+    ['Preferred job location','location preference','Houston, TX'],
+    ['Street address','address','123 Example Street']
+  ];
+  for(const [label,question,answer] of cases){
+    const result=resolveAnswer({label,type:'text'}, {}, {[question]:answer});
+    assert.equal(result.kind,'fill',label);
+    assert.equal(result.value,answer,label);
+    assert.equal(result.answer,answer,label);
+    assert.equal(result.sourceQuestion,question,label);
+    assert.equal(result.match,'equivalent',label);
+  }
+});
+
+test('clear education question wording reuses current studies while past universities need review',()=>{
+  const answers={school:'University of Houston',major:'Computer Science/IT','expected graduation':'Spring 2028'};
+  for(const [label,value] of [['Which university are you currently attending?','University of Houston'],
+    ['What is your major or field of study?','Computer Science/IT'],['What is your expected graduation date?','Spring 2028']]){
+    assert.equal(resolveAnswer({label,type:'text'}, {}, answers).value,value,label);
+  }
+  for(const label of ['University previously attended','Which university did you graduate from?']){
+    const result=resolveAnswer({label,type:'text'}, {}, answers);
+    assert.equal(result.kind,'missing',label);
+    assert.equal(result.suggestions?.[0].question,'school',label);
+    assert.equal(result.suggestions?.[0].answer,'University of Houston',label);
+  }
+});
+
+test('equivalent answers must match one available choice',()=>{
+  const answers={major:'Computer Science/IT'};
+  const field={label:'Field of study',type:'select',options:[{label:'Computer Science/IT',value:'major-7'},{label:'Marketing',value:'major-8'}]};
+  assert.equal(resolveAnswer(field,{},answers).value,'major-7');
+  const unavailable=resolveAnswer({...field,options:[{label:'Marketing',value:'major-8'}]}, {}, answers);
+  assert.equal(unavailable.kind,'missing');
+  assert.deepEqual(unavailable.suggestions?.map(item=>[item.question,item.answer]),[['major','Computer Science/IT']]);
+  assert.equal(resolveAnswer({...field,options:[{label:'Computer Science/IT',value:'a'},{label:'Computer Science/IT',value:'b'}]}, {}, answers).kind,'missing');
+});
+
+test('choice answers identify the displayed choice even when internal values are identical',()=>{
+  const field={label:'Are you authorized to work legally in the US?',type:'radio',options:[{label:'Yes',value:'on'},{label:'No',value:'on'}]};
+  const result=resolveAnswer(field,{}, {'are you legally authorized to work in the united states':false});
+  assert.equal(result.value,'on');
+  assert.equal(result.optionLabel,'No');
+});
+
+test('conflicting equivalent answers require review while an exact answer takes precedence',()=>{
+  const answers={school:'University of Houston','school name':'University of Texas'};
+  const conflict=resolveAnswer({label:'University name',type:'text'}, {}, answers);
+  assert.equal(conflict.kind,'missing');
+  assert.match(conflict.reason,/conflict/i);
+  assert.equal(conflict.suggestions.length,2);
+  const exact=resolveAnswer({label:'School name',type:'text'}, {}, answers);
+  assert.equal(exact.value,'University of Texas');
+  assert.equal(exact.match,'exact');
+  const same=resolveAnswer({label:'University name',type:'text'}, {}, {school:'University of Houston','school name':'University of Houston'});
+  assert.equal(same.value,'University of Houston');
+  const literal=resolveAnswer({label:'Street address',type:'text'}, {}, {address:'1','address line 1':'Yes'});
+  assert.equal(literal.kind,'missing');
+  assert.match(literal.reason,/conflict/i);
+});
+
+test('positive US authorization aliases preserve yes and no without answering citizenship or sponsorship',()=>{
+  const question='are you legally authorized to work in the united states';
+  const field={label:'Are you authorized to work legally in the US?',type:'radio',options:yesNo};
+  for(const [answer,want] of [[true,'yes-option'],[false,'no-option']])assert.equal(resolveAnswer(field,{}, {[question]:answer}).value,want);
+  for(const label of [
+    'Are you a US citizen?',
+    'Are you not authorized to work in the US?',
+    'Are you legally authorized to work in Canada?',
+    'Are you authorized to work in the US without sponsorship?',
+    'Are you authorized to work in the US and willing to relocate?',
+    'Are you legally authorized to work in the US now and after graduation?'
+  ])assert.equal(resolveAnswer({...field,label}, {}, {[question]:true}).kind,'missing',label);
+});
+
+test('current-or-future US sponsorship aliases stay distinct from authorization and narrower time questions',()=>{
+  const question='will you now or in the future require sponsorship to work in the united states';
+  const field={label:'Will you now or anytime after graduation require sponsorship for a work visa (like an H1b) to work legally in the US?',type:'radio',options:yesNo};
+  assert.equal(resolveAnswer(field,{}, {[question]:false}).value,'no-option');
+  assert.equal(resolveAnswer(field,{}, {[question]:true}).value,'yes-option');
+  for(const label of [
+    'Do you currently require sponsorship to work in the United States?',
+    'Will you require sponsorship after graduation to work in the US?',
+    'Will you now or in the future require sponsorship to work in Canada?',
+    'Will you now or in the future not require sponsorship to work in the US?',
+    'Are you authorized to work legally in the US?',
+    'Will you now or in the future require sponsorship to work in the US and relocate?'
+  ])assert.equal(resolveAnswer({...field,label}, {}, {[question]:false}).kind,'missing',label);
+});
+
+test('degree completion and graduation formatting require explicit compatible answers',()=>{
+  const answers={'degree type':"Bachelor's Degree",'expected graduation':'Spring 2028'};
+  assert.equal(resolveAnswer({label:'Highest completed degree',type:'text'}, {}, answers).kind,'missing');
+  const completed=resolveAnswer({label:'Highest degree earned',type:'text'}, {}, {'highest completed degree':'High School Diploma'});
+  assert.equal(completed.value,'High School Diploma');
+  for(const label of ['Expected graduation date (MM/YYYY)','Expected graduation (month/year)']){
+    const result=resolveAnswer({label,type:'text'}, {}, answers);
+    assert.equal(result.kind,'missing');
+    assert.equal(result.suggestions?.[0].answer,'Spring 2028');
+    assert.match(result.reason,/format/i);
+  }
+  const placeholder=resolveAnswer({label:'Expected graduation date',type:'text',placeholder:'MM/YYYY'}, {}, answers);
+  assert.equal(placeholder.kind,'missing');
+  assert.equal(placeholder.suggestions?.[0].answer,'Spring 2028');
+});
+
+test('a graduation field with a changed format reviews the same saved question until a valid date is confirmed',()=>{
+  const field={label:'Expected graduation*',type:'text',pattern:'[0-9]{2}/[0-9]{4}',placeholder:'MM/YYYY'};
+  const old=resolveAnswer(field,{}, {'expected graduation':'Spring 2028'});
+  assert.equal(old.kind,'missing');
+  assert.equal(old.suggestions?.[0].answer,'Spring 2028');
+  assert.match(old.reason,/format/i);
+  assert.equal(resolveAnswer(field,{}, {'expected graduation':'05/2028'}).value,'05/2028');
+  assert.equal(resolveAnswer(field,{}, {'expected graduation':'13/2028'}).kind,'missing');
+});
+
+test('day and space-separated graduation formats reject seasons and accept explicit dates',()=>{
+  for(const [format,value] of [['MM/DD/YYYY','05/15/2028'],['DD/MM/YYYY','15/05/2028'],['YYYY-MM-DD','2028-05-15'],['MM YYYY','05 2028'],['Month Year','May 2028']]){
+    const label=`Expected graduation date (${format})`,field={label,type:'text'};
+    const old=resolveAnswer(field,{}, {'expected graduation':'Spring 2028'});
+    assert.equal(old.kind,'missing',format);
+    assert.equal(old.suggestions?.[0].answer,'Spring 2028',format);
+    assert.equal(resolveAnswer(field,{}, {[normalizeQuestion(label)]:value}).value,value,format);
+  }
+  const field={label:'Expected graduation date',type:'text',placeholder:'MM/DD/YYYY'};
+  assert.equal(resolveAnswer(field,{}, {'expected graduation date':'02/30/2028'}).kind,'missing');
+});
+
+test('similar wording offers a suggestion without inventing automatic equivalence',()=>{
+  const result=resolveAnswer({label:'Tell us about your favorite project',type:'text'}, {}, {'describe your favorite project':'A scheduling app'});
+  assert.equal(result.kind,'missing');
+  assert.equal(result.suggestions?.[0].question,'describe your favorite project');
+  assert.equal(result.suggestions?.[0].answer,'A scheduling app');
+  for(const label of ['Years of Python experience','How many years of experience do you have with JavaScript?']){
+    const skill=resolveAnswer({label,type:'number'}, {}, {'years of java experience':4});
+    assert.equal(skill.kind,'missing');
+    assert.equal(skill.suggestions?.length||0,0);
+  }
+  assert.equal(resolveAnswer({label:'Preferred job location',type:'text'},{city:'Houston'},{}).kind,'missing');
+});
+
+test('SMS consent only reuses the same employer confirmation and explains unscoped old answers',async()=>{
+  const memory=await import('../src/answer-memory.mjs').catch(()=>({}));
+  assert.equal(typeof memory.savedAnswerKey,'function');
+  const label='If you provided a phone number, do you consent to receiving follow-up communication via text message (or SMS message) regarding your application status?';
+  const field={label,company:'BGE, Inc.',type:'radio',options:yesNo};
+  assert.equal(memory.savedAnswerKey(field),'sms consent for bge inc');
+  const confirmed=resolveAnswer(field,{}, {'sms consent for bge inc':false});
+  assert.equal(confirmed.value,'no-option');
+  assert.equal(confirmed.sourceQuestion,'sms consent for bge inc');
+  const old=resolveAnswer(field,{}, {'if you provided a phone number do you consent to receiving follow up communication via text message or sms message regarding your application status':true});
+  assert.equal(old.kind,'missing');
+  assert.equal(old.suggestions?.[0].answer,true);
+  assert.match(old.reason,/employer/i);
+  assert.equal(resolveAnswer({...field,company:'Other Employer'}, {}, {'sms consent for bge inc':true}).kind,'missing');
+  assert.equal(resolveAnswer({...field,company:undefined}, {}, {'sms consent for bge inc':true}).kind,'missing');
+  const shorter={...field,label:'Do you agree to receive text messages about your application?'};
+  assert.equal(memory.savedAnswerKey(shorter),'sms consent for bge inc');
+  assert.equal(resolveAnswer(shorter,{}, {'sms consent for bge inc':true}).value,'yes-option');
+  assert.equal(resolveAnswer({...field,label:'SMS consent for BGE, Inc.'}, {}, {'sms consent for bge inc':true}).value,'yes-option');
+  assert.equal(memory.savedAnswerKey({label:'Consent to a background check',company:'BGE, Inc.'}),'consent to a background check');
+});
+
+test('SMS consent does not reuse permission for a negated or promotional request',async()=>{
+  const {savedAnswerKey}=await import('../src/answer-memory.mjs');
+  for(const label of ['Do you not consent to receive SMS about your application?','Do you decline consent to SMS updates?',
+    'Do you consent to receive promotional text messages?','Do you agree to receive advertising text messages?',
+    'Do you consent to receiving text messages and phone calls about your application?',
+    'Do you consent to receiving text messages about your application from Another Employer?']){
+    const field={label,company:'BGE, Inc.',type:'radio',options:yesNo};
+    assert.equal(resolveAnswer(field,{}, {'sms consent for bge inc':true}).kind,'missing',label);
+    assert.notEqual(savedAnswerKey(field),'sms consent for bge inc',label);
+  }
+});
+
+test('text-only application updates consent shares the confirmed employer permission',async()=>{
+  const {savedAnswerKey}=await import('../src/answer-memory.mjs');
+  const field={label:'Do you consent to text message updates about your application?',company:'BGE, Inc.',type:'radio',options:yesNo};
+  assert.equal(savedAnswerKey(field),'sms consent for bge inc');
+  assert.equal(resolveAnswer(field,{}, {'sms consent for bge inc':'No'}).value,'no-option');
+});
+
+test('different SMS meanings require employer-scoped exact confirmation rather than old unscoped answers',async()=>{
+  const {savedAnswerKey}=await import('../src/answer-memory.mjs');
+  const field={label:'Do you consent to SMS marketing messages?',company:'BGE, Inc.',type:'radio',options:yesNo};
+  const key=savedAnswerKey(field);
+  assert.equal(key,'sms consent for bge inc question do you consent to sms marketing messages');
+  assert.equal(resolveAnswer(field,{}, {'do you consent to sms marketing messages':'No'}).kind,'missing');
+  assert.equal(resolveAnswer(field,{}, {[key]:'No'}).value,'no-option');
+  assert.equal(resolveAnswer({...field,company:'Other Employer'}, {}, {[key]:'No'}).kind,'missing');
+});
+
+test('an unknown employer placeholder cannot confirm reusable SMS permission',()=>{
+  const field={label:'Do you agree to receive text messages about your application?',company:'Company on LinkedIn',type:'radio',options:yesNo};
+  const result=resolveAnswer(field,{}, {'sms consent for company on linkedin':'Yes'});
+  assert.equal(result.kind,'missing');
+  assert.equal(result.manual,true);
+  assert.match(result.reason,/directly in LinkedIn/i);
+});
+
+test('sponsorship now-or-after-graduation wording is narrower than any future',()=>{
+  const field={label:'Will you now or after graduation require sponsorship to work in the US?',type:'radio',options:yesNo};
+  assert.equal(resolveAnswer(field,{}, {'will you now or in the future require sponsorship to work in the united states':'No'}).kind,'missing');
+});
+
+test('common questions never supply answers before the applicant saves one',async()=>{
+  const memory=await import('../src/answer-memory.mjs').catch(()=>({}));
+  assert.ok(Array.isArray(memory.commonQuestions));
+  assert.ok(memory.commonQuestions.length>=10);
+  for(const field of memory.commonQuestions){
+    assert.equal(resolveAnswer(field,{},{}).kind,'missing',field.label);
+    assert.equal(memory.savedAnswerKey(field),field.key,field.label);
+  }
+  const authorization=memory.commonQuestions.find(field=>field.key==='are you legally authorized to work in the united states');
+  assert.ok(authorization);
+  assert.equal(resolveAnswer(authorization,{}, {[authorization.key]:'No'}).value,'No');
+});

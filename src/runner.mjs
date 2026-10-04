@@ -39,7 +39,7 @@ export function createRunner({store,adapter,clock=realClock}) {
     if(pending && !['submitted','unconfirmed'].includes(state))state='unconfirmed';
     if(!['skipped','needs_answer','ready','submitted','unconfirmed','failed'].includes(state))state=pending?'unconfirmed':'failed';
     const record=pending||await store.createRecord(job,state);
-    await store.updateRecord(record.id,{status:state,reason:result.reason||state,evidence:result.evidence||null,finishedAt:clock.now().toISOString()});
+    await store.updateRecord(record.id,{status:state,reason:result.reason||state,evidence:result.evidence||null,finishedAt:clock.now().toISOString(),...(result.answerMatches?.length?{answerMatches:result.answerMatches}:{})});
     status.runStats[state==='needs_answer'?'needsAnswers':state]++;
     if(state==='skipped' && result.skipKind==='keyword')status.runStats.keywordSkipped++;
     if(result.pendingQuestions?.length){

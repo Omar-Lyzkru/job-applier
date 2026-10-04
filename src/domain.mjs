@@ -1,3 +1,6 @@
+import {normalizeQuestion,findSavedAnswer} from './answer-memory.mjs';
+export {normalizeQuestion} from './answer-memory.mjs';
+
 const profileKeys = ['firstName','lastName','email','phone','city','state','postalCode','country','linkedinUrl','website'];
 const aliases = {
   'first name':'firstName', 'last name':'lastName', 'email':'email', 'email address':'email',
@@ -109,9 +112,6 @@ export function readiness(config) {
   if (!config.resume) missing.push('Upload a résumé');
   return missing;
 }
-export function normalizeQuestion(text) {
-  return String(text).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
-}
 export function validateAnswers(input) {
   object(input,'Answers');
   if (Object.keys(input).length > 2000) throw new Error('Too many saved answers');
@@ -129,27 +129,32 @@ const yes = new Set(['yes','true','1','agree','i agree']);
 const no = new Set(['no','false','0','disagree']);
 export function resolveAnswer(field,profile,answers) {
   const key = normalizeQuestion(field.label);
-  let value, source;
-  if (Object.hasOwn(answers,key)) { value=answers[key]; source='saved answer'; }
-  else if (aliases[key] && profile[aliases[key]]) { value=profile[aliases[key]]; source='profile'; }
-  else if (key==='full name' && profile.firstName && profile.lastName) { value=`${profile.firstName} ${profile.lastName}`; source='profile'; }
-  else return {kind:'missing',reason:'No explicit saved answer'};
-  if (value===undefined || value===null || String(value).trim()==='') return {kind:'missing',reason:'Saved answer is empty'};
+  let memory=findSavedAnswer(field,answers), source='saved answer';
+  if(memory.kind==='missing'){
+    if (aliases[key] && profile[aliases[key]]) memory={answer:profile[aliases[key]],sourceQuestion:key,match:'profile'};
+    else if(key==='full name' && profile.firstName && profile.lastName) memory={answer:`${profile.firstName} ${profile.lastName}`,sourceQuestion:key,match:'profile'};
+    else return memory;
+    source='profile';
+  }
+  const {answer:value,sourceQuestion,match,suggestions}=memory;
+  const provenance={answer:value,sourceQuestion,match,source};
+  const missing=reason=>({kind:'missing',reason,...(suggestions?.length?{suggestions}:match==='exact'?{suggestions:[{question:sourceQuestion,answer:value,reason}]}:{})});
+  if (value===undefined || value===null || String(value).trim()==='') return missing('Saved answer is empty');
   if (field.type==='checkbox') {
     const normalized=normalizeQuestion(value);
-    if (typeof value==='boolean') return {kind:'fill',value,source};
-    if (yes.has(normalized)) return {kind:'fill',value:true,source};
-    if (no.has(normalized)) return {kind:'fill',value:false,source};
-    return {kind:'missing',reason:'Checkbox needs an explicit yes/no answer'};
+    if (typeof value==='boolean') return {kind:'fill',value,...provenance};
+    if (yes.has(normalized)) return {kind:'fill',value:true,...provenance};
+    if (no.has(normalized)) return {kind:'fill',value:false,...provenance};
+    return missing('Checkbox needs an explicit yes/no answer');
   }
   if (['select','radio'].includes(field.type)) {
     const desired = typeof value==='boolean' ? (value?'yes':'no') : normalizeQuestion(value);
     const match=(field.options||[]).filter(option=> normalizeQuestion(option.label)===desired);
-    if (match.length!==1 || match[0].value==='') return {kind:'missing',reason:'Saved answer does not match an available choice'};
-    return {kind:'fill',value:match[0].value,source};
+    if (match.length!==1 || match[0].value==='') return missing('Saved answer does not match an available choice');
+    return {kind:'fill',value:match[0].value,optionLabel:match[0].label,...provenance};
   }
-  if (field.type==='number' && !Number.isFinite(Number(value))) return {kind:'missing',reason:'A numeric answer is required'};
-  return {kind:'fill',value:String(value),source};
+  if (field.type==='number' && !Number.isFinite(Number(value))) return missing('A numeric answer is required');
+  return {kind:'fill',value:String(value),...provenance};
 }
 export function matchesJob(description,search) {
   const text = String(description).toLowerCase();

@@ -248,6 +248,8 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
     async apply(job,{profile,answers,resumePath,dryRun=false,signal,beforeSubmit}){
       let page,submitted=false;
       const applicationState={};
+      const withMatches=result=>({...result,...(applicationState.answerMatches?.length?{answerMatches:applicationState.answerMatches}: {})});
+      const complete=result=>finish(page,withMatches(result));
       try{
         checkStopped(signal);
         page=await navigateJob(job);
@@ -271,17 +273,17 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
         if(notReady)return {status:'paused',reason:notReady};
         for(let step=0;step<15;step++){
           checkStopped(signal);
-          const blocked=await interruption(page);if(blocked)return finish(page,{status:'paused',reason:blocked});
+          const blocked=await interruption(page);if(blocked)return complete({status:'paused',reason:blocked});
           const dialog=dialogFor(page);
-          if(!await dialog.count())return finish(page,{status:'failed',reason:'Unsupported application dialog layout'});
-          const filled=await fillApplicationFields(dialog,{profile,answers,resumePath,signal,applicationState,uploadTimeout:action});
-          if(filled.errors.length)return finish(page,{status:'failed',reason:filled.errors.join('; ')});
-          if(filled.questions.length)return finish(page,{status:'needs_answer',reason:'Required or prefilled questions need explicit answers',pendingQuestions:filled.questions.map(question=>({...question,jobId:job.id}))});
+          if(!await dialog.count())return complete({status:'failed',reason:'Unsupported application dialog layout'});
+          const filled=await fillApplicationFields(dialog,{profile,answers,resumePath,signal,company:job.company,applicationState,uploadTimeout:action});
+          if(filled.errors.length)return complete({status:'failed',reason:filled.errors.join('; ')});
+          if(filled.questions.length)return complete({status:'needs_answer',reason:'Required or prefilled questions need explicit answers',pendingQuestions:filled.questions.map(question=>({...question,jobId:job.id}))});
           const errors=await validationErrors(dialog,applicationState);
-          if(errors.length)return finish(page,{status:'failed',reason:`Form validation: ${errors.join('; ')}`});
+          if(errors.length)return complete({status:'failed',reason:`Form validation: ${errors.join('; ')}`});
           const submit=dialog.getByRole('button',{name:/^Submit application$/i}).first();
           if(await submit.isVisible().catch(()=>false)){
-            if(dryRun)return finish(page,{status:'ready',reason:'Review reached. Dry run did not submit.'});
+            if(dryRun)return complete({status:'ready',reason:'Review reached. Dry run did not submit.'});
             checkStopped(signal);
             if(typeof beforeSubmit!=='function')throw new Error('Submission guard is missing');
             await beforeSubmit();checkStopped(signal);
@@ -289,27 +291,27 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
             const end=Date.now()+confirmation;
             while(Date.now()<end){
               const success=page.getByText(/^(Application sent|Application submitted|Your application (?:was|has been) sent(?: to .*)?\.?|Your application has been submitted\.?)$/i).first();
-              if(await success.isVisible().catch(()=>false))return finish(page,{status:'submitted',reason:'LinkedIn confirmed the application',evidence:await success.innerText()});
+              if(await success.isVisible().catch(()=>false))return complete({status:'submitted',reason:'LinkedIn confirmed the application',evidence:await success.innerText()});
               const interruptionReason=await interruption(page);
-              if(interruptionReason)return finish(page,{status:'unconfirmed',reason:`Submit was clicked, but confirmation was interrupted: ${interruptionReason}`});
+              if(interruptionReason)return complete({status:'unconfirmed',reason:`Submit was clicked, but confirmation was interrupted: ${interruptionReason}`});
               await sleep(100);
             }
-            return finish(page,{status:'unconfirmed',reason:'Submit was clicked, but no explicit confirmation was observed. Check LinkedIn before applying again.'});
+            return complete({status:'unconfirmed',reason:'Submit was clicked, but no explicit confirmation was observed. Check LinkedIn before applying again.'});
           }
           const next=dialog.getByRole('button',{name:/^(Next|Review|Continue)(?:\s|$)/i}).first();
-          if(!await next.isVisible().catch(()=>false))return finish(page,{status:'failed',reason:'Unsupported application step: no Next, Review, or Submit action'});
+          if(!await next.isVisible().catch(()=>false))return complete({status:'failed',reason:'Unsupported application step: no Next, Review, or Submit action'});
           const previous=await dialog.innerText();
           await next.click();
           await dialog.waitFor({state:'visible',timeout:action});
           const end=Date.now()+action;
           while(Date.now()<end && await dialog.innerText()===previous)await sleep(100);
-          if(await dialog.innerText()===previous)return finish(page,{status:'failed',reason:'The application did not advance. Check its validation messages in LinkedIn.'});
-          const notReady=await applicationReady(page,signal);if(notReady)return {status:'paused',reason:notReady};
+          if(await dialog.innerText()===previous)return complete({status:'failed',reason:'The application did not advance. Check its validation messages in LinkedIn.'});
+          const notReady=await applicationReady(page,signal);if(notReady)return withMatches({status:'paused',reason:notReady});
         }
-        return finish(page,{status:'failed',reason:'Application exceeded the supported 15-step limit'});
+        return complete({status:'failed',reason:'Application exceeded the supported 15-step limit'});
       }catch(error){
         const result={status:submitted?'unconfirmed':'failed',reason:error.message.split('\n')[0]};
-        return page&&!page.isClosed()?finish(page,result):result;
+        return page&&!page.isClosed()?complete(result):withMatches(result);
       }
     },
     close:()=>session.close()
