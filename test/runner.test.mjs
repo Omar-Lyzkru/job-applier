@@ -8,7 +8,7 @@ import {defaultConfig} from '../src/domain.mjs';
 import {createRunner} from '../src/runner.mjs';
 
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return{promise,resolve};};
-async function setup(t,{count=3,outcome='submitted',config={},beforeGuard,afterGuard,throwAfterGuard=false,descriptions={}}={}){
+async function setup(t,{count=3,outcome='submitted',outcomes={},config={},beforeGuard,afterGuard,throwAfterGuard=false,descriptions={}}={}){
   const dir=await mkdtemp(join(tmpdir(),'job-applier-runner-'));t.after(()=>rm(dir,{recursive:true,force:true}));
   const resumePath=join(dir,'resume.pdf');await writeFile(resumePath,'%PDF-1.4');
   const store=await createStore(dir);
@@ -21,16 +21,18 @@ async function setup(t,{count=3,outcome='submitted',config={},beforeGuard,afterG
   const adapter={
     openBrowser:async()=>{observed.opens++;},isSignedIn:async()=>true,close:async()=>{},
     async *findJobs(){yield*jobs;},
-    inspect:async job=>({description:descriptions[job.id]||'Remote Python engineer',easyApply:true,alreadyApplied:false}),
+    inspect:async job=>({description:Object.hasOwn(descriptions,job.id)?descriptions[job.id]:'Remote Python engineer',easyApply:true,alreadyApplied:false}),
     async apply(job,options){
       observed.applications.push({job:structuredClone(job),profile:structuredClone(options.profile),answers:structuredClone(options.answers),resumePath:options.resumePath});
-      if(outcome==='paused')return {status:'paused',reason:'LinkedIn daily application limit'};
+      const result=outcomes[job.id]||outcome;
+      if(result==='paused')return {status:'paused',reason:'LinkedIn daily application limit'};
+      if(['needs_answer','failed','skipped'].includes(result))return {status:result,reason:'Blocked before submission'};
       if(beforeGuard)await beforeGuard(job,options,store);
       if(options.dryRun)return {status:'ready',reason:'Dry run'};
       await options.beforeSubmit();
       if(afterGuard)await afterGuard(job,options,store);
       if(throwAfterGuard)throw new Error('Browser disconnected after submit');
-      return {status:outcome,reason:outcome==='submitted'?'Application confirmed':'No confirmation'};
+      return {status:result,reason:result==='submitted'?'Application confirmed':'No confirmation'};
     }
   };
   const runner=createRunner({store,adapter,clock});
@@ -43,6 +45,92 @@ test('runner enforces scan bounds and description filters even on an unbounded a
   await runner.start();await runner.waitForIdle();
   const history=await store.getHistory();
   assert.deepEqual(history.map(r=>[r.job.id,r.status]),[['1001','skipped'],['1002','submitted']]);
+});
+test('runner stops unreadable descriptions before include or exclude filtering can skip or apply',async t=>{
+  for(const description of ['', ' \n\t ', undefined, null]){
+    for(const filters of [{includeKeywords:['Python'],excludeKeywords:[]},{includeKeywords:[],excludeKeywords:['Unpaid']}]){
+      const {runner,store,observed}=await setup(t,{descriptions:{1001:description},config:{search:{titles:['Engineer'],location:'Chicago',keywordMatch:'any',...filters}}});
+      await runner.start();await runner.waitForIdle();
+      assert.equal(observed.applications.length,0);
+      assert.equal(runner.getStatus().state,'failed');
+      assert.match(runner.getStatus().message,/could not read.*job description/i);
+      const history=await store.getHistory();
+      assert.deepEqual(history.map(record=>record.status),['failed']);
+      assert.equal(history[0].attemptedAt,null);
+      assert.equal(runner.getStatus().runStats.checked,1);
+      assert.equal(runner.getStatus().runStats.keywordSkipped,0);
+    }
+  }
+});
+test('runner does not require a description for a search with no keyword filters',async t=>{
+  const {runner,store}=await setup(t,{count:1,descriptions:{1001:''}});
+  await runner.start();await runner.waitForIdle();
+  assert.equal((await store.getHistory())[0].status,'submitted');
+});
+test('runner records an inspection error once and halts with no submission attempt',async t=>{
+  const {runner,store,adapter,observed}=await setup(t);
+  adapter.inspect=async()=>{throw new Error('Could not read the job description. Open LinkedIn to check this job.');};
+  await runner.start();await runner.waitForIdle();
+  assert.equal(runner.getStatus().state,'failed');
+  assert.match(runner.getStatus().message,/could not read.*job description/i);
+  assert.equal(observed.applications.length,0);
+  const history=await store.getHistory();
+  assert.deepEqual(history.map(record=>record.status),['failed']);
+  assert.equal(history[0].attemptedAt,null);
+  assert.match(history[0].reason,/could not read.*job description/i);
+  assert.equal(runner.getStatus().runStats.checked,1);
+  assert.equal(runner.getStatus().runStats.failed,1);
+  assert.equal(runner.getStatus().runStats.attempted,0);
+});
+test('runner passes cancellation into inspection and Stop does not record an inspection failure',async t=>{
+  const {runner,store,adapter,observed}=await setup(t);
+  const entered=deferred(),release=deferred();let inspectionSignal;
+  adapter.inspect=async(_job,{signal}={})=>{
+    inspectionSignal=signal;entered.resolve();
+    await Promise.race([release.promise,new Promise(resolve=>signal?.addEventListener('abort',resolve,{once:true}))]);
+    if(signal?.aborted)throw new Error('Stopped while reading the job description');
+    return {description:'Python role',easyApply:true,alreadyApplied:false};
+  };
+  await runner.start();await entered.promise;
+  const stopping=runner.stop();release.resolve();await stopping;
+  assert.equal(inspectionSignal?.aborted,true);
+  assert.equal(runner.getStatus().state,'idle');
+  assert.equal(runner.getStatus().runStats.failed,0);
+  assert.equal(runner.getStatus().runStats.attempted,0);
+  assert.equal(observed.applications.length,0);
+  assert.deepEqual(await store.getHistory(),[]);
+});
+test('runner summarizes outcomes separately from durable submission attempts',async t=>{
+  const {runner}=await setup(t,{count:5,descriptions:{1001:'Rust role'},outcomes:{1003:'needs_answer',1004:'unconfirmed',1005:'failed'},config:{search:{titles:['Engineer'],location:'Chicago',includeKeywords:['Python'],excludeKeywords:[]}}});
+  await runner.start();await runner.waitForIdle();
+  assert.deepEqual(runner.getStatus().runStats,{checked:5,attempted:2,submitted:1,unconfirmed:1,needsAnswers:1,ready:0,skipped:1,keywordSkipped:1,failed:1});
+  assert.match(runner.getStatus().message,/5 checked.*1 submitted.*1 need answers.*1 skipped/i);
+  assert.match(runner.getStatus().message,/1 unconfirmed/);
+});
+test('runner explains an all-skipped run and resets its summary on the next run',async t=>{
+  const {runner,store}=await setup(t,{count:2,config:{search:{titles:['Engineer'],location:'Chicago',includeKeywords:['COBOL'],excludeKeywords:[]}}});
+  await runner.start();await runner.waitForIdle();
+  assert.equal(runner.getStatus().runStats.checked,2);
+  assert.equal(runner.getStatus().runStats.keywordSkipped,2);
+  assert.equal(runner.getStatus().runStats.attempted,0);
+  assert.match(runner.getStatus().message,/review.*keyword filters/i);
+  const config=await store.getConfig();config.search.includeKeywords=[];await store.saveConfig(config);
+  await runner.start({dryRun:true});await runner.waitForIdle();
+  assert.equal(runner.getStatus().runStats.checked,2);
+  assert.equal(runner.getStatus().runStats.skipped,0);
+  assert.equal(runner.getStatus().runStats.keywordSkipped,0);
+  assert.equal(runner.getStatus().runStats.ready,2);
+  assert.equal(runner.getStatus().runStats.attempted,0);
+  assert.match(runner.getStatus().message,/2 ready.*dry run/i);
+});
+test('mixed skip summaries distinguish keyword rejection from jobs skipped after matching',async t=>{
+  const {runner}=await setup(t,{count:2,descriptions:{1001:'Rust role'},outcomes:{1002:'skipped'},config:{search:{titles:['Engineer'],location:'Chicago',includeKeywords:['Python'],excludeKeywords:[]}}});
+  await runner.start();await runner.waitForIdle();
+  assert.equal(runner.getStatus().runStats.skipped,2);
+  assert.equal(runner.getStatus().runStats.keywordSkipped,1);
+  assert.match(runner.getStatus().message,/No applications were attempted/);
+  assert.match(runner.getStatus().message,/1 job was rejected by keyword filters/);
+  assert.doesNotMatch(runner.getStatus().message,/No jobs passed/);
 });
 test('runner counts an uncertain submission toward the cap and prevents retries',async t=>{
   const {runner,store}=await setup(t,{outcome:'unconfirmed',config:{dailyCap:1}});
@@ -79,6 +167,7 @@ test('runner rejects another active start and preserves stop during submission',
   const reached=deferred(),release=deferred();
   const {runner,store}=await setup(t,{outcome:'unconfirmed',afterGuard:async()=>{reached.resolve();await release.promise;}});
   await runner.start();await reached.promise;
+  const pendingStats=runner.getStatus().runStats;
   await assert.rejects(runner.start(),/already running/i);
   const stopping=runner.stop();release.resolve();await stopping;
   const history=await store.getHistory();
@@ -86,6 +175,9 @@ test('runner rejects another active start and preserves stop during submission',
   assert.equal(history[0].status,'unconfirmed');
   assert.ok(history[0].attemptedAt);
   assert.equal(runner.getStatus().state,'idle');
+  assert.equal(pendingStats.attempted,1);
+  assert.equal(pendingStats.submitted,0);
+  assert.equal(runner.getStatus().runStats.unconfirmed,1);
 });
 test('runner stop before submission creates no durable attempt',async t=>{
   const reached=deferred(),release=deferred();
@@ -94,6 +186,7 @@ test('runner stop before submission creates no durable attempt',async t=>{
   const stopping=runner.stop();release.resolve();await stopping;
   assert.equal((await store.getHistory()).filter(r=>r.attemptedAt).length,0);
   assert.equal((await store.getHistory()).length,1);
+  assert.equal(runner.getStatus().runStats.attempted,0);
 });
 test('runner preserves uncertainty when the adapter throws after the guard',async t=>{
   const {runner,store}=await setup(t,{throwAfterGuard:true,config:{dailyCap:1}});

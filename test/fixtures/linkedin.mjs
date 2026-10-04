@@ -8,6 +8,7 @@ export async function startFixture(scenario='success') {
       const chunks=[]; for await (const chunk of req) chunks.push(chunk);
       const event=JSON.parse(Buffer.concat(chunks).toString());
       if (event.kind==='submit') {state.events.push('submit'); state.submissions.push(event.fields); state.fields=event.fields;}
+      if(event.kind==='reminder-continue'||event.kind==='reminder-review')state.events.push(event.kind);
       res.writeHead(200,{'Content-Type':'application/json'}); res.end('{}'); return;
     }
     res.setHeader('Content-Type','text/html');
@@ -31,17 +32,35 @@ export async function startFixture(scenario='success') {
       return;
     }
     if (!url.pathname.startsWith('/jobs/view')) {res.end('<nav><a href="/jobs/">Jobs</a></nav><h1>Feed</h1>');return;}
+    const modernDescription=text=>`<div class="cky-description-section"><div></div><div><h2>About the job</h2></div><p><span>${text}</span></p></div>`;
+    const descriptions={
+      'description-modern':modernDescription('Build Python software for our internship team.'),
+      'description-wrapped-controls':'<div><div><h2>About the job</h2><div><button>Show more</button><span hidden>Python elsewhere</span></div></div><p>Build Ruby systems for our team.</p></div>',
+      'description-modern-delayed':modernDescription(''),
+      'description-delayed':'<div id="job-details"></div>',
+      'description-empty-first':'<div id="job-details"></div><div class="jobs-description-content__text" style="display:none">Hidden Java description.</div><div data-job-description>Visible Python engineering description.</div>',
+      'description-missing':'<div><div><div><h2>About the job</h2></div><p></p></div><section><h3>Related jobs</h3><p>Python developer elsewhere.</p></section></div>',
+      'description-related':modernDescription('Build Ruby systems for our team.')+'<section><h2>Related jobs</h2><p>Python developer elsewhere.</p></section>',
+      'description-stopped':'<div id="job-details"></div>',
+      'description-verification':'<div id="job-details"></div>',
+      'description-no-metadata':'<div id="job-details">Remote Python software role.</div>'
+    };
+    const metadata=scenario.startsWith('description-')?'':'<h1>Software Engineer</h1><a href="/company/example/">Example</a>';
+    const description=descriptions[scenario]??'<div id="job-details">Remote Python software role.</div>';
     res.end(`<!doctype html><html><body><nav><a href="/jobs/">Jobs</a></nav><main>
-      <h1>Software Engineer</h1><a href="/company/example/">Example</a><div id="job-details">Remote Python software role.</div>
+      ${metadata}${description}
       ${scenario==='external'?'<a href="https://example.com/apply">Apply</a>':'<button id="easy" aria-label="Easy Apply to Software Engineer">Easy Apply</button>'}
       ${scenario==='already-applied'?'<p>Application submitted</p>':''}
       </main><script>
       const scenario=${JSON.stringify(scenario)};
+      if(scenario==='description-delayed')setTimeout(()=>{document.querySelector('#job-details').textContent='Hydrated Python software description.';},250);
+      if(scenario==='description-modern-delayed')setTimeout(()=>{document.querySelector('.cky-description-section p span').textContent='Hydrated Python internship description.';},250);
+      if(scenario==='description-verification')setTimeout(()=>{document.body.insertAdjacentHTML('afterbegin','<p>Complete this security check</p>');},250);
       let values={};
       let documents={'old-document':{name:'selected-resume.pdf',content:'old resume content'}};
       const escape=s=>String(s).replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;');
       function collect(){
-        for(const el of document.querySelectorAll('[role=dialog] input,[role=dialog] select,[role=dialog] textarea')){
+        for(const el of document.querySelectorAll(':is([role=dialog],dialog) input,:is([role=dialog],dialog) select,:is([role=dialog],dialog) textarea')){
           if(el.type==='radio'){if(el.checked)values[el.name]=el.value;}
           else if(el.type==='checkbox')values[el.name]=el.checked;
           else if(el.type==='file')values[el.name]=el.files[0]?.name||'';
@@ -50,14 +69,22 @@ export async function startFixture(scenario='success') {
         const documentChoice=document.querySelector('.jobs-document-upload input[type=radio]:checked');
         if(documentChoice){values.documentId=documentChoice.value;values.resume=documents[documentChoice.value].name;values.resumeContent=documents[documentChoice.value].content;}
       }
+      let dismissClicks=0;
       function dismiss(){
+        if(scenario==='dismiss-delayed'&&dismissClicks++===0)return;
+        if(scenario==='modern-discard'||scenario==='dismiss-delayed'){
+          const confirm=document.createElement('dialog');confirm.open=true;confirm.setAttribute('aria-label','Save this application?');confirm.style='position:fixed;top:20px;left:20px;z-index:999;background:white;padding:20px';
+          confirm.innerHTML='<h2>Save this application?</h2><span id="discard"><span>Discard</span></span><button>Save</button>';document.body.append(confirm);
+          confirm.querySelector('#discard').onclick=()=>{confirm.remove();document.querySelector('[role=dialog],dialog')?.remove();};return;
+        }
         const confirm=document.createElement('div');confirm.setAttribute('role','alertdialog');
+        confirm.style='position:fixed;top:20px;left:20px;z-index:999;background:white;padding:20px';
         confirm.innerHTML='<p>Discard application?</p><button id="discard">Discard</button>';
         document.body.append(confirm);
-        confirm.querySelector('button').onclick=()=>{confirm.remove();if(scenario!=='stuck-cleanup')document.querySelector('[role=dialog]')?.remove();};
+        confirm.querySelector('button').onclick=()=>{confirm.remove();if(scenario!=='stuck-cleanup')document.querySelector('[role=dialog],dialog')?.remove();};
       }
       function step(n){
-        let dialog=document.querySelector('[role=dialog]');
+        let dialog=document.querySelector('[role=dialog],dialog');
         if(!dialog){dialog=document.createElement('div');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-label','Apply to Example');document.body.append(dialog);}
         const close='<button aria-label="Dismiss" id="dismiss">×</button>';
         if(scenario==='limit'){dialog.innerHTML=close+'<p>You have reached the daily application limit. Please try again tomorrow.</p>';}
@@ -95,8 +122,33 @@ export async function startFixture(scenario='success') {
           if(scenario!=='timeout')dialog.innerHTML='<h2>Application sent</h2><p>Your application was sent to Example.</p><button id="done">Done</button>';
           dialog.querySelector('#done')?.addEventListener('click',()=>dialog.remove());
         });
+        if(scenario==='unrelated-dialog'&&!document.querySelector('#chat')){
+          const chat=document.createElement('div');chat.id='chat';chat.setAttribute('role','dialog');chat.innerHTML='<h2>MS in Applied Analytics</h2><button>Close your conversation</button>';document.body.append(chat);
+        }
       }
-      document.querySelector('#easy')?.addEventListener('click',()=>step(1));
+      function safetyReminder(){
+        const dialog=document.createElement('dialog');dialog.open=true;dialog.setAttribute('aria-labelledby','dialog-header');document.body.append(dialog);
+        dialog.innerHTML='<header><h2 id="dialog-header">'+(scenario==='safety-unknown'?'Job post safety warning':'Job search safety reminder')+'</h2></header><button aria-label="Dismiss" id="dismiss">×</button>';
+        dialog.querySelector('#dismiss').onclick=()=>dialog.remove();
+        const addReview=()=>{
+          dialog.insertAdjacentHTML('beforeend','<p>Research the company on its official website and social media.</p><p>Report suspicious jobs that request credit cards, bank details, or purchases.</p><button id="review-job">Review job post</button>');
+          dialog.querySelector('#review-job').onclick=()=>{fetch('/events',{method:'POST',body:JSON.stringify({kind:'reminder-review'})});dialog.remove();};
+        };
+        if(scenario==='safety-reminder')addReview();else setTimeout(addReview,100);
+        setTimeout(()=>{
+          if(!dialog.isConnected)return;
+          dialog.insertAdjacentHTML('beforeend','<div id="continue-applying"><span>Continue applying</span></div>');
+          dialog.querySelector('#continue-applying').onclick=()=>{
+            fetch('/events',{method:'POST',body:JSON.stringify({kind:'reminder-continue'})});dialog.remove();
+            const application=document.createElement('dialog');application.open=true;application.setAttribute('aria-label','Apply to Example');document.body.append(application);
+            application.innerHTML='<h2>Apply to Example</h2><button aria-label="Dismiss" id="dismiss">×</button><button>Submit application</button>';
+            application.querySelector('#dismiss').onclick=dismiss;
+            setTimeout(()=>{if(application.isConnected)step(1);},250);
+          };
+        },scenario==='safety-stop'?1500:250);
+      }
+      const attachEasy=()=>document.querySelector('#easy')?.addEventListener('click',()=>scenario.startsWith('safety-')?safetyReminder():step(1));
+      if(scenario==='opener-delayed')setTimeout(attachEasy,350);else attachEasy();
       </script></body></html>`);
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));

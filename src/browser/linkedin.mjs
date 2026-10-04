@@ -25,6 +25,57 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
     await page.goto(`${baseUrl}/jobs/view/${job.id}/`,{waitUntil:'domcontentloaded'});
     return page;
   }
+  async function jobContent(page,signal){
+    const end=Date.now()+action;
+    while(true){
+      checkStopped(signal);
+      const pause=await interruption(page);if(pause)throw new Error(pause);
+      const content=await page.evaluate(()=>{
+        const visible=element=>element.getClientRects().length>0 && !['hidden','collapse'].includes(getComputedStyle(element).visibility);
+        const text=element=>visible(element)?element.innerText.trim():'';
+        const narrative=element=>{
+          const walk=node=>{
+            if(node.nodeType===Node.TEXT_NODE)return node.textContent;
+            if(node.nodeType!==Node.ELEMENT_NODE||!visible(node)||node.matches('button,nav,aside,script,style,[role="button"],[role="navigation"],[role="complementary"],[role="status"],[role="progressbar"],[aria-busy="true"]'))return '';
+            if(node.tagName==='BR')return '\n';
+            const value=Array.from(node.childNodes).map(walk).join('');
+            return /^(block|list-item|table-row|flex|grid)$/.test(getComputedStyle(node).display)?`${value}\n`:value;
+          };
+          return walk(element).split('\n').map(line=>line.replace(/[\t\r ]+/g,' ').trim()).filter(Boolean).join('\n');
+        };
+        const firstText=selector=>Array.from(document.querySelectorAll(selector)).map(text).find(Boolean)||'';
+        let description=firstText('#job-details,.jobs-description-content__text,[data-job-description]');
+        if(!description){
+          const headingSelector='h1,h2,h3,h4,h5,h6,[role="heading"]';
+          const level=heading=>/^H[1-6]$/.test(heading.tagName)?Number(heading.tagName[1]):Number(heading.getAttribute('aria-level'))||2;
+          const headings=Array.from(document.querySelectorAll(headingSelector)).filter(heading=>text(heading).replace(/\s+/g,' ').toLowerCase()==='about the job');
+          for(const heading of headings){
+            let branch=heading,container=heading.parentElement;
+            // The current layout wraps its heading beside rich text. Stay inside that
+            // section: only the heading wrapper and its parent belong to this fallback.
+            for(let depth=0;container && depth<2;depth++){
+              if(container.matches('main,body,html,nav,aside,[role="main"],[role="navigation"],[role="complementary"]'))break;
+              if(Array.from(container.querySelectorAll(headingSelector)).some(other=>other!==heading && visible(other) && level(other)<=level(heading)))break;
+              const parts=Array.from(container.childNodes).filter(node=>node!==branch).map(node=>{
+                if(node.nodeType===Node.TEXT_NODE)return node.textContent.trim();
+                if(node.nodeType!==Node.ELEMENT_NODE || node.matches('button,nav,aside,script,style,[role="button"],[role="navigation"],[role="complementary"]'))return '';
+                return narrative(node);
+              }).filter(Boolean);
+              if(parts.length){description=parts.join('\n');break;}
+              branch=container;container=container.parentElement;
+            }
+            if(description)break;
+          }
+        }
+        return {description,title:firstText('h1'),company:firstText('a[href*="/company/"]')};
+      });
+      checkStopped(signal);
+      if(content.description)return content;
+      if(Date.now()>=end)break;
+      await sleep(Math.min(100,end-Date.now()));
+    }
+    throw new Error('Could not read this job\'s description. LinkedIn\'s job layout may have changed or the description did not load. Open the job in the browser and try again.');
+  }
   async function experienceFilterValues(page,levels,signal,{confirm=false}={}){
     const unavailable=()=>new Error(confirm?'LinkedIn did not confirm the selected experience levels. Check its filters, or clear Experience level in Settings before retrying.':'LinkedIn\'s experience-level filter is unavailable or changed. Open LinkedIn to check it, or clear Experience level in Settings before retrying.');
     const normalizePart=label=>label.replace(/[\u2010-\u2015]/g,'-').replace(/\([\d,.\s]+\)\s*$/,'').replace(/\s+/g,' ').trim().toLowerCase();
@@ -64,24 +115,64 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
     throw unavailable();
   }
   async function closeDraft(page){
-    const dialogs=page.locator('[role="dialog"]');
+    const dialogs=dialogFor(page);
     if(!await dialogs.count())return true;
-    const close=page.getByRole('button',{name:/^(Dismiss|Close|Done|Cancel)$/i}).last();
+    const close=dialogs.getByRole('button',{name:/^(Dismiss|Close|Done|Cancel)$/i}).last();
     try{
       if(await close.isVisible())await close.click({timeout:cleanup});
-      const end=Date.now()+cleanup;
+      const end=Date.now()+cleanup,retryAt=Date.now()+Math.min(1000,cleanup/2);let retried=false,discarded=false;
       while(Date.now()<end){
-        const discard=page.getByRole('button',{name:/^Discard$/i}).last();
-        if(await discard.isVisible().catch(()=>false))await discard.click({timeout:cleanup});
-        if(!await dialogs.count())return true;
+        const savePrompt=page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Save this application?',exact:true})}).first();
+        const saving=await savePrompt.isVisible().catch(()=>false);
+        const discard=saving?savePrompt.getByText('Discard',{exact:true}).first():page.getByRole('button',{name:/^Discard$/i}).last();
+        if(!discarded&&await discard.isVisible().catch(()=>false)){await discard.click({timeout:Math.max(1,end-Date.now())});discarded=true;}
+        if(!await dialogs.count()&&!await savePrompt.isVisible().catch(()=>false))return true;
+        if(!saving&&!discarded&&!retried&&Date.now()>=retryAt&&await close.isVisible().catch(()=>false)){
+          retried=true;await close.click({timeout:Math.max(1,end-Date.now())});
+        }
         await sleep(50);
       }
     }catch{}
-    return !await dialogs.count();
+    return !await dialogs.count()&&!await page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Save this application?',exact:true})}).first().isVisible().catch(()=>false);
   }
   async function finish(page,result){
     if(!await closeDraft(page))return {...result,status:'paused',reason:'Could not close the previous application dialog safely. Stop and close it in LinkedIn before starting again.'};
     return result;
+  }
+  async function applicationReady(page,signal){
+    let end=Date.now()+action,continued=false,sawReminder=false,previous='';
+    while(Date.now()<end){
+      checkStopped(signal);
+      const blocked=await interruption(page);if(blocked)return blocked;
+      const dialog=dialogFor(page);
+      const states=await dialog.evaluateAll(dialogs=>dialogs.map(root=>{
+        const visible=element=>element.getClientRects().length>0 && getComputedStyle(element).visibility!=='hidden';
+        const headings=Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"]')).filter(visible).map(element=>element.innerText.trim());
+        const controls=Array.from(root.querySelectorAll('input,select,textarea,[role="combobox"],[role="checkbox"],[role="radiogroup"],[role="listbox"],[role="textbox"],[contenteditable="true"]')).filter(element=>visible(element) && !['hidden','submit','button','reset'].includes(element.type)).map(element=>[element.tagName,element.type,element.name,element.getAttribute('aria-label'),element.required]);
+        const actions=Array.from(root.querySelectorAll('button,[role="button"]')).filter(visible).map(element=>(element.getAttribute('aria-label')||element.innerText).trim()).filter(label=>/^(?:Next|Review|Continue)(?:\s|$)|^Submit application$/i.test(label));
+        const busy=Array.from(root.querySelectorAll('[aria-busy="true"],[role="progressbar"]')).some(visible);
+        return {headings,controls,actions,busy};
+      }));
+      const state=states[0];
+      if(state){
+        if(state.headings.includes('Job search safety reminder')){
+          sawReminder=true;previous='';
+          const proceed=dialog.getByText('Continue applying',{exact:true}).first();
+          if(!continued&&await proceed.isVisible().catch(()=>false)){
+            checkStopped(signal);await proceed.click();continued=true;end=Date.now()+action;
+          }
+        }else if(state.headings[0] && !/^apply\b/i.test(state.headings[0]) && /safety|warning|security verification|verify your identity|suspicious|risk warning/i.test(state.headings[0])){
+          return 'LinkedIn showed an unfamiliar safety or verification warning. Review it in the browser before continuing.';
+        }else if((state.controls.length||state.headings.some(heading=>/^review\b/i.test(heading))) && state.actions.length && !state.busy){
+          const current=JSON.stringify(state);
+          if(current===previous)return null;
+          previous=current;
+        }else previous='';
+      }else previous='';
+      await sleep(100);
+    }
+    checkStopped(signal);
+    return sawReminder&&!continued?'LinkedIn\'s safety reminder did not finish loading. Review it in the browser before continuing.':'LinkedIn\'s application form did not finish loading. Open the job in the browser and try again.';
   }
   const adapter={
     async openBrowser(){const page=await session.open();if(!headless)await page.bringToFront();return page;},
@@ -128,13 +219,10 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
         }
       }
     },
-    async inspect(job){
+    async inspect(job,{signal}={}){
+      checkStopped(signal);
       const page=await navigateJob(job);
-      const pause=await interruption(page);if(pause)throw new Error(pause);
-      const details=page.locator('#job-details,.jobs-description-content__text,[data-job-description]').first();
-      const description=await details.innerText({timeout:action}).catch(()=> '');
-      const title=await page.locator('h1').first().innerText().catch(()=>job.title);
-      const company=await page.locator('a[href*="/company/"]').first().innerText().catch(()=>job.company);
+      const {description,title,company}=await jobContent(page,signal);
       job.title=title||job.title;job.company=company||job.company;
       return {description,alreadyApplied:await page.getByText(/^(Application submitted|Applied)$/i).first().isVisible().catch(()=>false),easyApply:await page.getByRole('button',{name:/Easy Apply/i}).first().isVisible().catch(()=>false)};
     },
@@ -149,15 +237,27 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
         const easy=page.getByRole('button',{name:/Easy Apply/i}).first();
         if(!await easy.isVisible())return {status:'skipped',reason:'This job does not offer LinkedIn Easy Apply'};
         await easy.click();
-        await page.getByRole('dialog').first().waitFor({state:'visible',timeout:action});
+        const openingEnd=Date.now()+action,retryAt=Date.now()+Math.min(1000,action/2);let retried=false;
+        while(!await dialogFor(page).isVisible().catch(()=>false)){
+          checkStopped(signal);
+          const blocked=await interruption(page);if(blocked)return {status:'paused',reason:blocked};
+          if(Date.now()>=openingEnd)throw new Error('LinkedIn did not open its application form. Open the job in the browser and try again.');
+          // Opening a form is safe to retry once when its first click preceded hydration.
+          if(!retried&&Date.now()>=retryAt&&await easy.isVisible().catch(()=>false)){
+            checkStopped(signal);retried=true;await easy.click();
+          }
+          await sleep(100);
+        }
+        const notReady=await applicationReady(page,signal);
+        if(notReady)return {status:'paused',reason:notReady};
         for(let step=0;step<15;step++){
           checkStopped(signal);
           const blocked=await interruption(page);if(blocked)return finish(page,{status:'paused',reason:blocked});
           const dialog=dialogFor(page);
           if(!await dialog.count())return finish(page,{status:'failed',reason:'Unsupported application dialog layout'});
           const filled=await fillApplicationFields(dialog,{profile,answers,resumePath,signal,applicationState,uploadTimeout:action});
-          if(filled.questions.length)return finish(page,{status:'needs_answer',reason:'Required or prefilled questions need explicit answers',pendingQuestions:filled.questions.map(question=>({...question,jobId:job.id}))});
           if(filled.errors.length)return finish(page,{status:'failed',reason:filled.errors.join('; ')});
+          if(filled.questions.length)return finish(page,{status:'needs_answer',reason:'Required or prefilled questions need explicit answers',pendingQuestions:filled.questions.map(question=>({...question,jobId:job.id}))});
           const errors=await validationErrors(dialog);
           if(errors.length)return finish(page,{status:'failed',reason:`Form validation: ${errors.join('; ')}`});
           const submit=dialog.getByRole('button',{name:/^Submit application$/i}).first();
@@ -185,6 +285,7 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
           const end=Date.now()+action;
           while(Date.now()<end && await dialog.innerText()===previous)await sleep(100);
           if(await dialog.innerText()===previous)return finish(page,{status:'failed',reason:'The application did not advance. Check its validation messages in LinkedIn.'});
+          const notReady=await applicationReady(page,signal);if(notReady)return {status:'paused',reason:notReady};
         }
         return finish(page,{status:'failed',reason:'Application exceeded the supported 15-step limit'});
       }catch(error){

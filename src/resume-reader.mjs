@@ -4,6 +4,7 @@ import {recommendKeywords} from './resume-keywords.mjs';
 // Parser diagnostics can contain document contents; the only output is our JSON.
 console.log=console.warn=console.error=()=>{};
 const MAX_TEXT=100_000,MAX_EXPANDED=8_000_000;
+const OLE_HEADER=Buffer.from('d0cf11e0a1b11ae1','hex');
 function bounded(text){
   if(text.length>MAX_TEXT)throw new Error('This résumé has too much text. Use a shorter résumé to get keyword suggestions.');
   return text;
@@ -49,6 +50,8 @@ async function extract(bytes,extension){
     return bounded((await mammoth.extractRawText({buffer:bytes})).value);
   }
   if(extension==='.doc'){
+    // WordExtractor also accepts DOCX; keep ZIP files on the preflighted path.
+    if(!bytes.subarray(0,OLE_HEADER.length).equals(OLE_HEADER))throw new Error('This Word document does not match the legacy DOC format. Export a new PDF or DOCX.');
     const {default:WordExtractor}=await import('word-extractor');
     const document=await new WordExtractor().extract(bytes);
     return bounded([document.getBody(),document.getTextboxes(),document.getHeaders()].join('\n'));

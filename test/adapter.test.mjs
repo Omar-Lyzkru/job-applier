@@ -9,14 +9,138 @@ import {createLinkedInAdapter} from '../src/browser/linkedin.mjs';
 const job={id:'1001',url:'https://www.linkedin.com/jobs/view/1001/',title:'Software Engineer',company:'Example'};
 const profile={firstName:'Test',lastName:'Applicant',email:'test@example.com',phone:'5551234567'};
 const answers={'years of java experience':0,'are you authorized to work in this country':true,'are you willing to relocate':false,'i agree to share this information':true};
-async function setup(t,scenario='success') {
+async function setup(t,scenario='success',timeouts={}) {
   const fixture=await startFixture(scenario);
   const dir=await mkdtemp(join(tmpdir(),'job-applier-browser-'));
   const resumePath=join(dir,'selected-resume.pdf');await writeFile(resumePath,'%PDF-1.4\nfixture');
-  const adapter=createLinkedInAdapter({dataDir:dir,headless:true,fixtureBaseUrl:fixture.url,timeouts:{action:2000,confirmation:500,cleanup:500}});
+  const adapter=createLinkedInAdapter({dataDir:dir,headless:true,fixtureBaseUrl:fixture.url,timeouts:{action:2000,confirmation:500,cleanup:500,...timeouts}});
   t.after(async()=>{await adapter.close();await fixture.close();await rm(dir,{recursive:true,force:true});});
   return {adapter,fixture,resumePath,options:{profile,answers,resumePath,dryRun:false,beforeSubmit:async()=>fixture.state.events.push('guard')}};
 }
+
+test('browser: description reads modern About the job section without a title heading',async t=>{
+  const {adapter,fixture}=await setup(t,'description-modern',{action:600});
+  const candidate={...job,title:'Card internship title',company:'Card company'};
+  const result=await adapter.inspect(candidate);
+  assert.equal(result.description,'Build Python software for our internship team.');
+  assert.equal(candidate.title,'Card internship title');
+  assert.equal(candidate.company,'Card company');
+  assert.equal(result.easyApply,true);
+  assert.deepEqual(fixture.state.events,[]);
+});
+test('browser: description waits for delayed legacy and modern hydration',async t=>{
+  for(const [scenario,expected] of [['description-delayed','Hydrated Python software description.'],['description-modern-delayed','Hydrated Python internship description.']]){
+    const {adapter}=await setup(t,scenario,{action:1000});
+    assert.equal((await adapter.inspect({...job})).description,expected);
+  }
+});
+test('browser: nested controls and hidden text cannot replace the modern description',async t=>{
+  const {adapter}=await setup(t,'description-wrapped-controls',{action:600});
+  assert.equal((await adapter.inspect({...job})).description,'Build Ruby systems for our team.');
+});
+test('browser: description ignores empty and hidden legacy candidates',async t=>{
+  const {adapter}=await setup(t,'description-empty-first',{action:600});
+  assert.equal((await adapter.inspect({...job})).description,'Visible Python engineering description.');
+});
+test('browser: description never includes related-job keywords outside its section',async t=>{
+  const {adapter}=await setup(t,'description-related',{action:600});
+  const result=await adapter.inspect({...job});
+  assert.equal(result.description,'Build Ruby systems for our team.');
+  assert.doesNotMatch(result.description,/Python|Related jobs/);
+});
+test('browser: missing description throws an extraction error instead of matching related jobs',async t=>{
+  const {adapter,fixture}=await setup(t,'description-missing',{action:600});
+  await assert.rejects(adapter.inspect({...job}),/description.*(?:read|layout|extract)|(?:read|extract).*description/i);
+  assert.deepEqual(fixture.state.events,[]);
+});
+test('browser: optional title and company metadata do not delay description inspection',async t=>{
+  const {adapter}=await setup(t,'description-no-metadata');
+  await adapter.openBrowser();
+  const candidate={...job,title:'Card title',company:'Card company'};
+  const started=performance.now();
+  const result=await adapter.inspect(candidate);
+  assert.ok(performance.now()-started<1500,'Optional metadata waited for the action timeout');
+  assert.equal(result.description,'Remote Python software role.');
+  assert.equal(candidate.title,'Card title');
+  assert.equal(candidate.company,'Card company');
+});
+test('browser: stopping while description hydrates interrupts inspection',async t=>{
+  const {adapter,fixture}=await setup(t,'description-stopped',{action:1000});
+  await adapter.openBrowser();
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),250);t.after(()=>clearTimeout(timer));
+  await assert.rejects(adapter.inspect({...job},{signal:controller.signal}),/Stopped/);
+  assert.deepEqual(fixture.state.events,[]);
+});
+test('browser: verification appearing while description hydrates interrupts inspection',async t=>{
+  const {adapter,fixture}=await setup(t,'description-verification',{action:1000});
+  await assert.rejects(adapter.inspect({...job}),/verification/i);
+  assert.deepEqual(fixture.state.events,[]);
+});
+
+test('browser: safety reminder follows Continue applying text instead of Review job post',async t=>{
+  for(const dryRun of [true,false]){
+    const {adapter,fixture,options}=await setup(t,'safety-reminder');
+    const result=await adapter.apply({...job},{...options,dryRun});
+    assert.equal(result.status,dryRun?'ready':'submitted',JSON.stringify(result));
+    assert.deepEqual(fixture.state.events,dryRun?['reminder-continue']:['reminder-continue','guard','submit']);
+    const page=await adapter.openBrowser();
+    assert.equal(await page.getByRole('dialog').count(),0,'Native application dialog remained open after completion');
+  }
+});
+test('browser: Easy Apply shown before its click handler retries opening once without submitting',async t=>{
+  const {adapter,fixture,options}=await setup(t,'opener-delayed');
+  const result=await adapter.apply({...job},{...options,dryRun:true});
+  assert.equal(result.status,'ready',JSON.stringify(result));
+  assert.deepEqual(fixture.state.events,[]);
+});
+test('browser: unrelated chat dialogs do not prevent application draft cleanup',async t=>{
+  const {adapter,fixture,options}=await setup(t,'unrelated-dialog');
+  const result=await adapter.apply({...job},{...options,dryRun:true});
+  assert.equal(result.status,'ready',JSON.stringify(result));
+  assert.deepEqual(fixture.state.events,[]);
+  const page=await adapter.openBrowser();
+  assert.equal(await page.getByRole('dialog').count(),1);
+  assert.equal(await page.getByRole('heading',{name:'MS in Applied Analytics',exact:true}).isVisible(),true);
+});
+test('browser: modern save prompt discards through its exact text and retries an unhandled dismissal once',async t=>{
+  for(const scenario of ['modern-discard','dismiss-delayed']){
+    const {adapter,fixture,options}=await setup(t,scenario,{cleanup:1000});
+    const result=await adapter.apply({...job},{...options,dryRun:true});
+    assert.equal(result.status,'ready',scenario+': '+JSON.stringify(result));
+    assert.deepEqual(fixture.state.events,[]);
+    const page=await adapter.openBrowser();assert.equal(await page.getByRole('dialog').count(),0);
+  }
+});
+test('browser: safety reminder waits for hydrated application fields before reaching review',async t=>{
+  const {adapter,fixture,options}=await setup(t,'safety-hydrating');
+  const result=await adapter.apply({...job},{...options,dryRun:true,answers:{}});
+  assert.equal(result.status,'needs_answer',JSON.stringify(result));
+  assert.ok(result.pendingQuestions.some(question=>question.label==='Years of Java experience'));
+  assert.deepEqual(fixture.state.events,['reminder-continue']);
+  const page=await adapter.openBrowser();
+  assert.equal(await page.getByRole('dialog').count(),0,'Native application draft was not discarded');
+});
+test('browser: unfamiliar safety warning pauses without choosing or dismissing it',async t=>{
+  const {adapter,fixture,options}=await setup(t,'safety-unknown');
+  const result=await adapter.apply({...job},{...options,dryRun:true});
+  assert.equal(result.status,'paused',JSON.stringify(result));
+  assert.match(result.reason,/safety|warning/i);
+  assert.deepEqual(fixture.state.events,[]);
+  const page=await adapter.openBrowser();
+  assert.equal(await page.getByRole('heading',{name:'Job post safety warning',exact:true}).isVisible(),true);
+});
+test('browser: Stop interrupts safety reminder readiness without applying',async t=>{
+  const {adapter,fixture,options}=await setup(t,'safety-stop');
+  const page=await adapter.openBrowser();
+  const controller=new AbortController();
+  const pending=adapter.apply({...job},{...options,dryRun:true,signal:controller.signal});
+  await page.getByRole('heading',{name:'Job search safety reminder',exact:true}).waitFor();
+  controller.abort();
+  const result=await pending;
+  assert.match(result.reason,/Stopped/);
+  assert.deepEqual(fixture.state.events,[]);
+});
 
 test('browser: multistep explicit answers and selected resume precede one confirmed submission',async t=>{
   const {adapter,fixture,options}=await setup(t);

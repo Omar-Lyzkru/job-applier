@@ -167,3 +167,16 @@ test('résumé analysis rejects a small compressed Word file that expands beyond
   assert.match((await response.json()).error,/large file|simpler/i);
   assert.equal((await store.getConfig()).resume.filename,'expanded.docx');
 });
+
+test('résumé analysis rejects DOCX content renamed to legacy DOC before parsing and retains the upload',async t=>{
+  const {upload,send,store}=await setup(t);
+  const bytes=await readFile(new URL('./fixtures/resumes/expanded.docx',import.meta.url));
+  const uploaded=await upload('expanded.doc',bytes);
+  assert.equal(uploaded.status,200);
+  const saved=(await uploaded.json()).resume;
+  const response=await send('/api/resume/keywords');
+  assert.equal(response.status,400);
+  assert.match((await response.json()).error,/DOC format|legacy Word/i);
+  assert.deepEqual((await store.getConfig()).resume,saved);
+  assert.deepEqual(await readFile(saved.path),bytes);
+});

@@ -2,6 +2,19 @@ import {stat} from 'node:fs/promises';
 import {readiness,matchesJob,dayKey,countsTowardCap,blocksRetry,MAX_RESUME_BYTES} from './domain.mjs';
 
 function stopped(signal){if(signal.aborted)throw new Error('Stopped before submission');}
+const emptyRunStats=()=>({checked:0,attempted:0,submitted:0,unconfirmed:0,needsAnswers:0,ready:0,skipped:0,keywordSkipped:0,failed:0});
+function finishMessage(stats){
+  const parts=[`${stats.checked} checked`,`${stats.attempted} attempted`,`${stats.submitted} submitted`,`${stats.needsAnswers} need answers`,`${stats.skipped} skipped`];
+  if(stats.ready)parts.push(`${stats.ready} ready — dry run`);
+  if(stats.unconfirmed)parts.push(`${stats.unconfirmed} unconfirmed`);
+  if(stats.failed)parts.push(`${stats.failed} failed`);
+  let message=`Run finished. ${parts.join('; ')}.`;
+  if(stats.checked>0 && stats.attempted===0 && stats.skipped===stats.checked && stats.keywordSkipped>0){
+    message+=` No applications were attempted. ${stats.keywordSkipped} ${stats.keywordSkipped===1?'job was':'jobs were'} rejected by keyword filters. Review your keyword filters.`;
+  }
+  if(stats.unconfirmed)message+=' Check unconfirmed applications in LinkedIn before trying them again.';
+  return message;
+}
 const realClock={
   now:()=>new Date(),
   sleep(ms,signal){
@@ -15,7 +28,7 @@ const realClock={
 };
 export function createRunner({store,adapter,clock=realClock}) {
   let active=null,starting=false,controller=null;
-  const status={state:'idle',currentJob:null,message:'Complete your setup, then open LinkedIn to sign in.',startedAt:null,finishedAt:null,todayCount:0};
+  const status={state:'idle',currentJob:null,message:'Complete your setup, then open LinkedIn to sign in.',startedAt:null,finishedAt:null,todayCount:0,runStats:emptyRunStats()};
   const recount=(history,config)=>{
     status.todayCount=history.filter(record=>countsTowardCap(record,dayKey(clock.now(),config.timezone),config.timezone)).length;
     return status.todayCount;
@@ -27,6 +40,8 @@ export function createRunner({store,adapter,clock=realClock}) {
     if(!['skipped','needs_answer','ready','submitted','unconfirmed','failed'].includes(state))state=pending?'unconfirmed':'failed';
     const record=pending||await store.createRecord(job,state);
     await store.updateRecord(record.id,{status:state,reason:result.reason||state,evidence:result.evidence||null,finishedAt:clock.now().toISOString()});
+    status.runStats[state==='needs_answer'?'needsAnswers':state]++;
+    if(state==='skipped' && result.skipKind==='keyword')status.runStats.keywordSkipped++;
     if(result.pendingQuestions?.length){
       const existing=await store.getQuestions();
       const merged=new Map(existing.map(question=>[`${question.jobId}:${question.key}`,question]));
@@ -48,16 +63,27 @@ export function createRunner({store,adapter,clock=realClock}) {
         if(scanned>=config.scanLimit)break;
         const history=await store.getHistory();
         if(!config.dryRun && recount(history,config)>=config.dailyCap){status.state='paused';status.message='Daily application cap reached.';break;}
-        scanned++;status.currentJob=structuredClone(job);status.message=`Checking ${job.title} at ${job.company}`;
+        status.runStats.checked=++scanned;status.currentJob=structuredClone(job);status.message=`Checking ${job.title} at ${job.company}`;
         if(history.some(record=>record.job.id===job.id && blocksRetry(record))){
           await recordOutcome(job,{status:'skipped',reason:'Already submitted or uncertain in local history'},null);continue;
         }
-        const details=await adapter.inspect(job);
+        let details;
+        try{details=await adapter.inspect(job,{signal});}
+        catch(error){
+          if(!signal.aborted)await recordOutcome(job,{status:'failed',reason:error.message.split('\n')[0]},null);
+          throw error;
+        }
         if(signal.aborted)break;
         status.currentJob=structuredClone(job);
+        const needsDescription=config.search.includeKeywords.length>0 || config.search.excludeKeywords.length>0;
+        if(!details.alreadyApplied && details.easyApply && needsDescription && (typeof details.description!=='string' || !details.description.trim())){
+          const reason='Could not read this job description, so keyword filters could not be checked. Open the job in LinkedIn and try again.';
+          await recordOutcome(job,{status:'failed',reason},null);
+          status.state='failed';status.message=reason;break;
+        }
         if(details.alreadyApplied||!details.easyApply||!matchesJob(details.description,config.search)){
           const reason=details.alreadyApplied?'LinkedIn shows this job as already applied':!details.easyApply?'No LinkedIn Easy Apply':'Description does not match your keyword filters';
-          await recordOutcome(job,{status:'skipped',reason},null);continue;
+          await recordOutcome(job,{status:'skipped',reason,skipKind:!details.alreadyApplied && details.easyApply?'keyword':null},null);continue;
         }
         let pending=null,result;
         const beforeSubmit=async()=>{
@@ -74,6 +100,7 @@ export function createRunner({store,adapter,clock=realClock}) {
           current=await store.getHistory();
           if(recount(current,config)>=config.dailyCap)throw new Error('Daily application cap reached');
           pending=await store.createRecord(job,'submission_pending');
+          status.runStats.attempted++;
           pending=await store.updateRecord(pending.id,{attemptedAt:clock.now().toISOString(),reason:'Waiting for LinkedIn submission confirmation'});
           recount(await store.getHistory(),config);
           status.message=`Submitting ${job.title} at ${job.company}`;
@@ -86,7 +113,7 @@ export function createRunner({store,adapter,clock=realClock}) {
         if(result.status==='paused'){status.state='paused';status.message=result.reason;break;}
         if(signal.aborted)break;
       }
-      if(status.state==='running'){status.state='idle';status.message=`Run finished. ${scanned} jobs inspected.`;}
+      if(status.state==='running'){status.state='idle';status.message=finishMessage(status.runStats);}
     }catch(error){
       if(!signal.aborted){
         status.state=/sign in|verification|application.*limit|speed.*limit/i.test(error.message)?'paused':'failed';
@@ -113,6 +140,7 @@ export function createRunner({store,adapter,clock=realClock}) {
         if(!resume?.isFile() || resume.size===0 || resume.size>MAX_RESUME_BYTES)throw new Error('The selected résumé is missing, empty, or over 2 MB. Upload it again.');
         stopped(controller.signal);
         recount(await store.getHistory(),config);
+        status.runStats=emptyRunStats();
         status.state='running';status.currentJob=null;status.startedAt=clock.now().toISOString();status.finishedAt=null;status.message=config.dryRun?'Starting dry run':'Starting automatic applications';
         const signal=controller.signal;
         active=run(config,answers,signal).finally(()=>{active=null;});

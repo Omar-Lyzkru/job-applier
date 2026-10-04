@@ -114,6 +114,61 @@ search-only check: no application run was started and no application was
 submitted. Live employer-form submission compatibility remains unverified.
 Restart the app and refresh its dashboard to load the fix.
 
+## Application efficiency and searchable answers — 2026-10-03
+
+The initial history audit found 90 skipped records and no submission attempts.
+The current signed-in LinkedIn job page no longer exposed the legacy description
+selectors or an H1. Empty descriptions were treated as keyword mismatches, and
+optional title lookup added a timeout. Inspection now reads the visible, scoped
+**About the job** section, waits for description hydration, and keeps search-card
+metadata when optional details are missing. Unreadable descriptions produce an
+extraction failure rather than a keyword skip. Tests exclude nested buttons,
+hidden text, and related-job keywords, and cover Stop and verification checks.
+
+Live previews revealed further changes in LinkedIn's application flow. The
+generic safety reminder has a **Continue applying** text control, while its
+**Review job post** button leads away from the form. The adapter follows the
+known reminder and waits for application controls to hydrate. Opening and closing
+a form permit one bounded retry when an initial click has no effect; submissions
+are never retried. Unknown warnings remain pauses. Native dialog cleanup scopes
+the application and its known **Save this application?** prompt, whose **Discard**
+control is also text. Unrelated messaging dialogs no longer prevent cleanup.
+
+The modern résumé section contains a labelled region, an unnamed native-radio
+fieldset, and an **Upload resume** button, with no rendered file input. The
+adapter arms the file chooser before clicking that scoped action, uploads the
+selected local file with a unique name, and verifies acceptance and selection of
+that exact new document. It rejects ambiguous actions, pending or failed uploads,
+and old same-named documents. Ordinary CV screening questions and unsupported
+controls retain their existing handling. Native checkboxes covered by a visible
+control use their associated HTML label and verify the resulting checked state.
+
+Choice questions in **Answers**, including **Phone country code**, now provide
+typing with a visible filtered list, click selection, and arrow-key/Enter
+selection. Exact typed labels save in their canonical displayed form; partial
+labels do not save. The regression exercises the actual localhost API, keyboard
+and pointer input, canonical saved labels, and a 390px viewport. Desktop and mobile
+screenshots were inspected with no horizontal document overflow.
+
+The runner reports checked jobs, durable submission attempts, confirmed
+submissions, missing answers, skips, and failures separately. Inspection failures
+stop filtering instead of silently skipping or applying. The existing résumé
+reader also now checks the complete legacy DOC signature, preventing renamed
+DOCX ZIP content from bypassing its expansion preflight.
+
+A separate signed-in live preview of the Vilo software/data internship matched
+the user's saved keyword filters, uploaded and selected the new résumé, handled
+the checkbox, and discarded the draft cleanly. It returned **Needs answer** only
+for **Phone country code**, with 249 offered choices. Every live preview used
+`dryRun: true` and an additional rejecting submission guard. No real application
+was submitted; live submission confirmation remains unverified.
+
+Fresh complete suites pass: **60 unit/API tests and 64 browser scenarios**.
+JavaScript syntax and Git whitespace checks pass. The separate reviewer found
+the nested-description-button regression; it was reproduced and fixed. Modern
+form and cleanup regressions were likewise observed failing before their fixes.
+Restart the server and refresh the dashboard to load all application changes.
+
 ## Execution record
 
 # SDD ledger — plan: docs/superpowers/plans/2026-10-01-linkedin-easy-apply.md

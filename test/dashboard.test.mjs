@@ -74,6 +74,35 @@ async function settingsPage(t,profile={},search={}){
   return {store,page};
 }
 
+test('browser: phone country answers support typing, visible matching choices, keyboard selection and exact saved labels',async t=>{
+  const {store,page}=await settingsPage(t);
+  await store.saveQuestions([{key:'phone country code',label:'Phone country code*',type:'select',required:true,options:[{label:'Select an option',value:''},{label:'United States (+1)',value:'us'},{label:'United Kingdom (+44)',value:'gb'},{label:'Canada (+1)',value:'ca'}],jobId:'1001',blocker:'missing_answer'}]);
+  await page.reload();await page.getByRole('button',{name:'Answers',exact:true}).click();
+  const input=page.getByRole('combobox',{name:'Answer for Phone country code*',exact:true});
+  await input.fill('United');
+  assert.equal(await page.getByRole('option',{name:'United States (+1)',exact:true}).isVisible(),true);
+  assert.equal(await page.getByRole('option',{name:'United Kingdom (+44)',exact:true}).isVisible(),true);
+  assert.equal(await page.getByRole('option',{name:'Canada (+1)',exact:true}).count(),0);
+  await mkdir(resolve('test-artifacts'),{recursive:true});
+  await page.screenshot({path:resolve('test-artifacts/answers-search-desktop.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.screenshot({path:resolve('test-artifacts/answers-search-mobile.png'),fullPage:true});
+  await page.getByRole('button',{name:'Save this answer',exact:true}).click();
+  await page.getByText('Choose an answer from the list',{exact:true}).waitFor();
+  assert.deepEqual(await store.getAnswers(),{});
+  await input.fill('Canada');await input.press('ArrowDown');await input.press('Enter');
+  assert.equal(await input.inputValue(),'Canada (+1)');
+  await input.fill('United');await page.getByRole('option',{name:'United States (+1)',exact:true}).click();
+  assert.equal(await input.inputValue(),'United States (+1)');
+  await input.fill('');await input.press('Escape');await page.getByRole('button',{name:'Show choices for Phone country code*',exact:true}).click();
+  assert.equal(await page.getByRole('option',{name:'Canada (+1)',exact:true}).isVisible(),true);
+  await input.fill('united states (+1)');
+  await page.getByRole('button',{name:'Save this answer',exact:true}).click();
+  await page.getByText('Answer saved',{exact:true}).waitFor();
+  assert.equal((await store.getAnswers())['phone country code'],'United States (+1)');
+});
+
 test('browser: saving bare profile links works with Enter and persists normalized URLs',async t=>{
   const {store,page}=await settingsPage(t);
   await page.getByLabel('LinkedIn profile URL',{exact:true}).fill('www.linkedin.com/in/test-applicant');

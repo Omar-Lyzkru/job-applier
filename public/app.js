@@ -162,6 +162,41 @@ function inputLabel(text,input){
   const wrapper=create('div','field answer-field'),label=create('label',null,text);
   input.id=`answer-control-${++controlId}`;label.htmlFor=input.id;wrapper.append(label,input);return wrapper;
 }
+function searchableAnswer(text,options){
+  const input=create('input'),field=inputLabel(text,input),group=create('div','answer-choice'),list=create('div','answer-choice-list'),toggle=create('button','answer-choice-toggle','▾');
+  const labels=[...new Set(options.filter(option=>option.value!=='').map(option=>option.label))];
+  input.type='text';input.autocomplete='off';input.placeholder='Type or choose an answer';
+  input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-expanded','false');
+  list.id=`${input.id}-choices`;list.setAttribute('role','listbox');list.setAttribute('aria-label',text);list.hidden=true;
+  input.setAttribute('aria-controls',list.id);toggle.type='button';toggle.setAttribute('aria-label',`Show choices for ${text.replace(/^Answer for /,'')}`);
+  field.append(group);group.append(input,toggle,list);
+  let matches=labels,active=-1;
+  const close=()=>{list.hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');active=-1;};
+  const choose=label=>{input.value=label;input.focus();close();};
+  const show=()=>{
+    const query=input.value.trim().toLocaleLowerCase();matches=labels.filter(label=>label.toLocaleLowerCase().includes(query));active=-1;
+    input.removeAttribute('aria-activedescendant');list.replaceChildren();
+    for(const [index,label] of matches.entries()){
+      const option=create('button','answer-choice-option',label);option.type='button';option.setAttribute('role','option');option.setAttribute('aria-selected','false');option.id=`${list.id}-${index}`;
+      option.addEventListener('click',()=>choose(label));list.append(option);
+    }
+    if(!matches.length)list.append(create('p','answer-choice-empty','No matching choices'));
+    list.hidden=false;input.setAttribute('aria-expanded','true');
+  };
+  input.addEventListener('focus',show);input.addEventListener('input',show);
+  toggle.addEventListener('click',()=>{const opening=list.hidden;input.focus();if(opening)show();else close();});
+  input.addEventListener('keydown',event=>{
+    if(event.key==='Tab'){close();return;}
+    if(event.key==='Escape'){event.preventDefault();close();return;}
+    if(event.key==='Enter'&&!list.hidden&&active>=0){event.preventDefault();choose(matches[active]);return;}
+    if(!['ArrowDown','ArrowUp'].includes(event.key))return;
+    event.preventDefault();if(list.hidden)show();if(!matches.length)return;
+    active=event.key==='ArrowDown'?(active+1)%matches.length:active<0?matches.length-1:(active-1+matches.length)%matches.length;
+    const choices=Array.from(list.children);choices.forEach((option,index)=>option.setAttribute('aria-selected',String(index===active)));
+    input.setAttribute('aria-activedescendant',choices[active].id);choices[active].scrollIntoView({block:'nearest'});
+  });
+  return {input,field,choice:()=>labels.find(label=>label.toLocaleLowerCase()===input.value.trim().toLocaleLowerCase())};
+}
 function renderQuestions(){
   const signature=JSON.stringify(state.questions);if(signature===questionSignature)return;questionSignature=signature;
   const fragment=document.createDocumentFragment();
@@ -171,15 +206,16 @@ function renderQuestions(){
     const context=create('p');if(job){context.append(jobAnchor(job,'question-job'));context.append(document.createTextNode(` · ${job.company}`));}else context.textContent='Question from a LinkedIn application';card.append(context);
     if(question.reason)card.append(create('p',null,question.reason));
     if(question.type==='unsupported'){card.append(create('p',null,'Complete this control directly in LinkedIn. The app cannot enter it automatically.'));fragment.append(card);continue;}
-    const input=create(question.options?.length||question.type==='checkbox'?'select':'input');
+    const searchable=question.type==='select'&&question.options?.length?searchableAnswer(`Answer for ${question.label}`,question.options):null;
+    const input=searchable?.input||create(question.options?.length||question.type==='checkbox'?'select':'input');
     if(input.tagName==='SELECT'){
       const placeholder=create('option',null,'Choose an answer');placeholder.value='';input.append(placeholder);
       const options=question.type==='checkbox'?[{label:'Yes',value:'yes'},{label:'No',value:'no'}]:question.options;
       for(const option of options){if(option.value==='')continue;const choice=create('option',null,option.label);choice.value=option.label;input.append(choice);}
     }
-    const row=create('div','answer-row'),button=create('button','button primary answer-action','Save this answer');button.type='button';
-    button.addEventListener('click',()=>{const value=input.value.trim();if(!value){toast('Enter an answer first',true);return;}perform(()=>api('/api/answers',{...state.answers,[question.key]:value}),'Answer saved');});
-    row.append(inputLabel(`Answer for ${question.label}`,input),button);card.append(row);fragment.append(card);
+    const row=create('div',searchable?'answer-row searchable-row':'answer-row'),button=create('button','button primary answer-action','Save this answer');button.type='button';
+    button.addEventListener('click',()=>{const value=searchable?searchable.choice():input.value.trim();if(!value){toast(searchable?'Choose an answer from the list':'Enter an answer first',true);return;}perform(()=>api('/api/answers',{...state.answers,[question.key]:value}),'Answer saved');});
+    row.append(searchable?.field||inputLabel(`Answer for ${question.label}`,input),button);card.append(row);fragment.append(card);
   }
   byId('pending-questions').replaceChildren(fragment);byId('questions-empty').hidden=state.questions.length>0;
 }

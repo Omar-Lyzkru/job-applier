@@ -35,6 +35,8 @@ Country and state / region accept typing and show dropdown suggestions. Enter or
 
 **Keyword matching** controls Include keywords: **Match all keywords** requires every listed term; **Match any keyword** accepts at least one. An empty Include keywords field allows any description. Exclude keywords always skip a job if any listed term appears. Older settings retain Match all keywords until you change it. For example, Match any keyword can accept a Python role even when it does not also mention C++.
 
+The app reads LinkedIn's job description section before checking keywords. It supports the newer **About the job** layout as well as the earlier description layout. If the description cannot be read, the run explains the problem instead of reporting a keyword mismatch. Optional missing job titles or company details keep their search-card values without adding a wait.
+
 **Recommended keywords** reads the uploaded résumé on your computer and suggests recognized skills actually mentioned in its text. Suggestions appear after an upload; choose **Read résumé** to read an existing file. Review the checked suggestions, then choose **Add selected keywords**. This keeps your existing keywords, adds your selection, and chooses **Match any keyword** so a job does not need every skill on your résumé. Edit the list as needed and **Save settings**. Reading a résumé never changes saved filters or supplies screening answers. Suggestions use a built-in skill vocabulary and can miss skills; you can always type additional keywords.
 
 PDF, DOC, and DOCX keyword extraction is included in setup. A scanned PDF needs selectable text; password-protected, damaged, or unusually complex documents may need a fresh PDF or DOCX export. Suggestion failures keep the uploaded résumé available for applications. Résumé text is processed locally and is not sent to an AI service or added to GitHub.
@@ -50,7 +52,13 @@ PDF, DOC, and DOCX keyword extraction is included in setup. A scanned PDF needs 
 
 Pending and uncertain attempts count toward the daily cap. Defaults are 10 applications per day, at most 100 jobs inspected per run, and 45 seconds between attempts. The counter resets at midnight in your configured timezone, initially America/Chicago. LinkedIn may enforce a separate application/speed limit; the runner pauses when it sees one.
 
-Company-site applications are skipped. Changed layouts, unsupported controls, sign-in checks, and verification challenges pause the run or produce a recorded reason. The initial browser adapter targets English LinkedIn screens. Open LinkedIn to complete sign-in/verification or handle unsupported forms manually.
+Company-site applications are skipped. Changed layouts, unsupported controls, sign-in checks, and verification challenges pause the run or produce a recorded reason. The browser adapter targets English LinkedIn screens. It follows the known **Job search safety reminder** through **Continue applying** and waits for the application fields to load. Unfamiliar warnings and verification checks require your attention. Open LinkedIn to complete sign-in/verification or handle unsupported forms manually.
+
+Résumé uploads support both file fields and LinkedIn's newer **Upload resume** chooser. The app uses a unique filename to verify that the freshly uploaded document was accepted and selected. An older document with the same original filename cannot satisfy that check.
+
+In **Answers**, choice questions such as **Phone country code** let you type to filter the offered choices and view the matching list. Click a choice or use the arrow keys and Enter, then **Save this answer**. Exact typed labels also save; partial names must be selected from the list. The saved answer uses LinkedIn's displayed label rather than its internal option value.
+
+The completed-run message reports jobs checked, submission attempts, confirmed submissions, jobs needing answers, and skips. Finding a job does not count as applying: an attempt begins when the app reserves its submission, and **Submitted** requires LinkedIn confirmation. If every checked job is skipped and keyword filters rejected jobs, the message points you to review those filters.
 
 ## Local data
 
