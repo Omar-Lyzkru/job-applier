@@ -41,6 +41,7 @@ function syncControls(){
   read.disabled=!ready||busy||recommendationLoading||!state?.config.resume;
   read.textContent=recommendationLoading?'Reading résumé…':'Read résumé';read.classList.toggle('is-loading',recommendationLoading);read.setAttribute('aria-busy',String(recommendationLoading));
   byId('add-resume-keywords').disabled=!ready||busy||recommendationLoading||!byId('recommended-skills').querySelector('input:checked');
+  if(byId('add-confirmed-skills'))byId('add-confirmed-skills').disabled=byId('add-resume-keywords').disabled;
   byId('recommended-skills').querySelectorAll('input').forEach(input=>{input.disabled=!ready||busy||recommendationLoading;});
   byId('dry-run').disabled=!ready||busy||active;
 }
@@ -55,6 +56,78 @@ function fillSettings(){
   updateKeywordHelp();
   for(const key of ['dailyCap','scanLimit','intervalSeconds','timezone'])form.elements.namedItem(key).value=config[key];
   byId('dry-run').checked=config.dryRun;
+  fillMatching();
+}
+const skillName=id=>state.intelligenceOptions?.skills.find(skill=>skill.id===id)?.label||id;
+function matchingInput(container,label,name,value,type='text'){
+  const input=create(type==='textarea'?'textarea':'input');if(type!=='textarea')input.type=type;input.name=name;input.value=value??'';container.append(inputLabel(label,input));return input;
+}
+function matchingChoice(container,label,name,value,choices){
+  const input=create('select');input.name=name;
+  for(const [key,text] of choices){const option=create('option',null,text);option.value=key;input.append(option);}
+  input.value=String(value??'');container.append(inputLabel(label,input));return input;
+}
+function matchingCheck(container,label,name,checked){
+  const input=create('input');input.type='checkbox';input.name=name;input.checked=!!checked;const wrapper=inputLabel(label,input);wrapper.classList.add('check-row');container.append(wrapper);return input;
+}
+function addSearchRegion(region={}){
+  const list=byId('matching-regions');if(list.children.length>=10){toast('Choose at most 10 search regions',true);return;}
+  const number=++controlId,row=create('div','matching-region');row.dataset.region='true';
+  const name=matchingInput(row,`Search region ${list.children.length+1}`,'',region.name||'');name.dataset.regionField='name';name.setAttribute('list','matching-location-options');
+  const priority=matchingInput(row,`Priority for region ${list.children.length+1}`,'',region.priority??10,'number');priority.min='0';priority.max='10';priority.step='1';priority.dataset.regionField='priority';
+  const workplace=matchingChoice(row,`Workplace for region ${list.children.length+1}`,'',region.workplace||'any',[['any','Any workplace'],['remote','Remote'],['hybrid','Hybrid'],['onsite','On site']]);workplace.dataset.regionField='workplace';
+  const remove=create('button','button','Remove region');remove.type='button';remove.setAttribute('aria-label',`Remove search region ${list.children.length+1}`);remove.addEventListener('click',()=>row.remove());row.append(remove);list.append(row);syncControls();
+}
+function fillMatching(){
+  const i=state.config.intelligence,root=byId('matching-settings');root.replaceChildren();
+  matchingCheck(root,'Enable intelligent matching','intelligence.enabled',i.enabled);
+  root.append(create('p','answer-memory-help','When enabled, Include keywords become interests. Confirmed skills determine technical fit; exclusions still apply. Matching facts never fill application questions.'));
+  const grid=create('div','matching-grid'),score=matchingInput(grid,'Minimum fit score','intelligence.minimumFitScore',i.minimumFitScore,'number');score.min='55';score.max='100';score.step='1';
+  const scoreHelp=create('p','answer-memory-help');const update=()=>{scoreHelp.textContent=Number(score.value)<70?'Borderline jobs can apply at this minimum. Required eligibility still needs to be resolved.':'Jobs below this minimum need review or are skipped. Required eligibility still needs to be resolved.';};score.addEventListener('input',update);update();grid.append(scoreHelp);root.append(grid);
+  const facts=create('section','matching-section');facts.append(create('h3',null,'Your confirmed matching facts'));
+  const factGrid=create('div','matching-grid'),skills=matchingInput(factGrid,'Confirmed skills','intelligence.skills',(i.candidate.skills||[]).map(skillName).join('\n'),'textarea');
+  const reviewed=matchingCheck(factGrid,'I have reviewed my skills','intelligence.skillsReviewed',i.candidate.skills!==null);skills.addEventListener('input',()=>{if(skills.value.trim())reviewed.checked=true;});
+  factGrid.append(create('p','answer-memory-help','One recognized skill per line. Leaving skills unreviewed means unknown; a reviewed empty list means none.'));
+  const years=matchingInput(factGrid,'Professional experience in years','intelligence.professionalYears',i.candidate.professionalYears,'number');years.min='0';years.max='80';years.step='any';
+  matchingChoice(factGrid,'Currently a student','intelligence.student',i.candidate.student,[['','Unknown'],['true','Yes'],['false','No']]);
+  const degrees=[['','Unknown'],['none','None'],['high_school','High school'],['associate',"Associate's degree"],['bachelor',"Bachelor's degree"],['master',"Master's degree"],['doctorate','Doctorate']];
+  for(const [key,label] of [['currentEducation','Current'],['completedEducation','Completed']]){
+    matchingChoice(factGrid,`${label} degree`,`intelligence.${key}.degree`,i.candidate[key]?.degree,degrees);matchingInput(factGrid,`${label} major`,`intelligence.${key}.major`,i.candidate[key]?.major||'');
+  }
+  const clearances=matchingInput(factGrid,'Existing clearances','intelligence.clearances',(i.candidate.clearances||[]).join('\n'),'textarea'),clearanceReviewed=matchingCheck(factGrid,'I have reviewed my clearances','intelligence.clearancesReviewed',i.candidate.clearances!==null);clearances.addEventListener('input',()=>{if(clearances.value.trim())clearanceReviewed.checked=true;});
+  facts.append(factGrid);root.append(facts);
+  const families=create('section','matching-section');families.append(create('h3',null,'Choose role families'),create('p','answer-memory-help','Choose only the families you want. Edit their titles or keep custom Job titles above.'));
+  const familyGrid=create('div','matching-grid');
+  for(const [id,preset] of Object.entries(state.intelligenceOptions.families)){
+    const card=create('div','matching-family');card.dataset.family=id;
+    const check=matchingCheck(card,preset.label,'intelligence.roleFamilies',i.roleFamilies.includes(id));check.value=id;
+    const titles=matchingInput(card,`Titles for ${preset.label}`,`intelligence.familyTitles.${id}`,(i.familyTitles[id]||preset.titles).join('\n'),'textarea'),preferred=matchingCheck(card,`Prefer ${preset.label}`,'intelligence.preferredFamilies',i.preferredFamilies.includes(id));preferred.value=id;
+    const visible=()=>{titles.parentElement.hidden=!check.checked;preferred.parentElement.hidden=!check.checked;};check.addEventListener('change',visible);visible();familyGrid.append(card);
+  }
+  families.append(familyGrid);root.append(families);
+  const regions=create('section','matching-section');regions.append(create('h3',null,'Search regions'),create('p','answer-memory-help','Priorities run from 0 to 10. Use an actual country or city for remote searches. With no regions here, Search location above is used. The scan limit bounds coverage; up to 50 title/region queries are supported.'));
+  const list=create('div');list.id='matching-regions';regions.append(list);root.append(regions);
+  const locations=create('datalist');locations.id='matching-location-options';for(const country of countries){const option=create('option');option.value=country.name;locations.append(option);}regions.append(locations);
+  for(const region of i.regions)addSearchRegion(region);
+  const add=create('button','button','Add search region');add.type='button';add.addEventListener('click',()=>addSearchRegion());regions.append(add);
+  const preferences=create('div','matching-grid');matchingInput(preferences,'Preferred companies','intelligence.preferredCompanies',i.preferredCompanies.join('\n'),'textarea');matchingInput(preferences,'Excluded companies','intelligence.excludedCompanies',i.excludedCompanies.join('\n'),'textarea');
+  matchingCheck(preferences,'Exclude unpaid roles','intelligence.excludeUnpaid',i.excludeUnpaid);matchingCheck(preferences,'Exclude commission-only roles','intelligence.excludeCommissionOnly',i.excludeCommissionOnly);matchingCheck(preferences,'Exclude senior roles for an entry-level search','intelligence.rejectSeniorForEntry',i.rejectSeniorForEntry);root.append(preferences);
+  if(!byId('add-confirmed-skills')){
+    const button=create('button','button','Add selected skills');button.type='button';button.id='add-confirmed-skills';button.disabled=true;byId('add-resume-keywords').after(button);
+    button.addEventListener('click',()=>{
+      const selected=Array.from(byId('recommended-skills').querySelectorAll('input:checked'),input=>input.value);if(!selected.length||busy||recommendationLoading)return;
+      const form=byId('settings-form'),field=form.elements.namedItem('intelligence.skills'),seen=new Set();field.value=[...field.value.split('\n'),...selected].map(v=>v.trim()).filter(v=>v&&!seen.has(v.toLowerCase())&&seen.add(v.toLowerCase())).join('\n');form.elements.namedItem('intelligence.skillsReviewed').checked=true;toast('Selected skills added. Save settings to confirm them.');
+    });
+  }
+}
+function matchingSettings(values){
+  const lines=name=>String(values.get(name)||'').split('\n').map(value=>value.trim()).filter(Boolean),education=key=>{
+    const degree=String(values.get(`intelligence.${key}.degree`)||''),major=String(values.get(`intelligence.${key}.major`)||'').trim();
+    if(!degree&&major)throw new Error(`Choose a ${key==='currentEducation'?'current':'completed'} degree to save its major`);return degree?{degree,major:major||null}:null;
+  };
+  const years=String(values.get('intelligence.professionalYears')||'').trim(),student=String(values.get('intelligence.student')||'');
+  return {enabled:values.has('intelligence.enabled'),minimumFitScore:Number(values.get('intelligence.minimumFitScore')),candidate:{skills:values.has('intelligence.skillsReviewed')?lines('intelligence.skills'):null,clearances:values.has('intelligence.clearancesReviewed')?lines('intelligence.clearances'):null,professionalYears:years===''?null:Number(years),student:student===''?null:student==='true',currentEducation:education('currentEducation'),completedEducation:education('completedEducation')},
+    roleFamilies:values.getAll('intelligence.roleFamilies'),familyTitles:Object.fromEntries(Object.keys(state.intelligenceOptions.families).map(id=>[id,lines(`intelligence.familyTitles.${id}`)])),regions:Array.from(byId('matching-regions').children,row=>({name:row.querySelector('[data-region-field=name]').value.trim(),priority:Number(row.querySelector('[data-region-field=priority]').value),workplace:row.querySelector('[data-region-field=workplace]').value})),preferredCompanies:lines('intelligence.preferredCompanies'),excludedCompanies:lines('intelligence.excludedCompanies'),preferredFamilies:values.getAll('intelligence.preferredFamilies'),excludeUnpaid:values.has('intelligence.excludeUnpaid'),excludeCommissionOnly:values.has('intelligence.excludeCommissionOnly'),rejectSeniorForEntry:values.has('intelligence.rejectSeniorForEntry')};
 }
 function updateKeywordHelp(){
   byId('include-help').textContent=byId('keyword-match').value==='any'?'Any can match · one per line':'All must match · one per line';
@@ -148,6 +221,20 @@ function renderRows(body,records){
     const known=Object.hasOwn(resultNames,record.status)?record.status:'failed';
     result.append(create('span',`result-badge ${known}`,resultNames[known]));
     if(record.reason)result.append(create('small','result-reason',record.reason));
+    if(record.job.assessment){
+      const assessment=record.job.assessment;
+      if(assessment.score!==null){result.append(create('p','fit-score',`Fit: ${assessment.score}/100`),create('span','fit-band',assessment.band));}
+      const details=create('details','fit-details');details.append(create('summary',null,'Why this fit'));
+      const factorNames={title:'Role match',skills:'Technical skills',experience:'Experience',education:'Education and student status',location:'Location',recency:'Posting age',ease:'Easy Apply',interest:'Your interests'};
+      for(const factor of assessment.factors||[]){
+        details.append(create('p',null,`${factorNames[factor.key]||factor.key}: ${factor.earned}/${factor.max}${factor.unknown?' · unknown':''}`));
+        const evidence=(Array.isArray(factor.evidence)?factor.evidence:[factor.evidence]).map(value=>typeof value==='string'?value:value?.text).filter(Boolean);
+        for(const text of new Set(evidence))details.append(create('small','fit-evidence',text));
+      }
+      for(const [key,label] of [['matchedSkills','Matched skills'],['missingSkills','Missing skills']])if(assessment[key]?.length)details.append(create('p',null,`${label}: ${assessment[key].map(skillName).join(', ')}`));
+      for(const uncertainty of assessment.uncertainties||[])details.append(create('p',null,uncertainty));
+      for(const reason of assessment.reasons||[])details.append(create('p',null,reason.message));result.append(details);
+    }
     const date=new Date(record.finishedAt||record.attemptedAt||record.startedAt);
     when.textContent=Number.isNaN(date.getTime())?'—':new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:state.config.timezone}).format(date);
     row.append(title,company,result,when);fragment.append(row);
@@ -340,6 +427,7 @@ byId('settings-form').addEventListener('submit',event=>{
   search.experienceLevels=values.getAll('search.experienceLevels');
   search.keywordMatch=String(values.get('search.keywordMatch')||'all');
   const config={...state.config,profile,search,dryRun:byId('dry-run').checked};
+  try{config.intelligence=matchingSettings(values);}catch(error){toast(error.message,true);return;}
   for(const key of ['dailyCap','scanLimit','intervalSeconds'])config[key]=Number(values.get(key));config.timezone=String(values.get('timezone')||'').trim();
   perform(async()=>{
     const result=await api('/api/config',config);

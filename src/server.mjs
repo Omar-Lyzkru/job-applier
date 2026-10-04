@@ -9,6 +9,8 @@ import {createLinkedInAdapter} from './browser/linkedin.mjs';
 import {MAX_RESUME_BYTES,readiness,dayKey,countsTowardCap,resolveAnswer} from './domain.mjs';
 import {commonQuestions,savedAnswerKey,normalizeQuestion} from './answer-memory.mjs';
 import {analyzeResume} from './resume-analysis.mjs';
+import {roleFamilyPresets} from './search-profiles.mjs';
+import {skillVocabulary,canonicalSkill} from './skills.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 function failure(message,status=400){return Object.assign(new Error(message),{status});}
@@ -89,7 +91,8 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
         });
         const uniqueReuse=new Map(reusedAnswers.map(match=>[`${match.company}:${match.label}`,match]));
         const answerMemory={commonQuestions:prepared,employers,smsAnswers,reusedAnswers:[...uniqueReuse.values()].slice(-40)};
-        send({config,answers,questions,answerMemory,history:history.slice(-200).reverse(),status:await status(),readiness:readiness(config),token});return;
+        const intelligenceOptions={families:roleFamilyPresets,skills:skillVocabulary.map(([label])=>({id:canonicalSkill(label),label}))};
+        send({config,answers,questions,answerMemory,intelligenceOptions,history:history.slice(-200).reverse(),status:await status(),readiness:readiness(config),token});return;
       }
       if(req.method==='GET' && path==='/api/status'){send(await status());return;}
       if(req.method==='GET' && path==='/api/history.csv'){

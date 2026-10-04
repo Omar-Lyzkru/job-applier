@@ -60,9 +60,9 @@ test('browser: dashboard setup, answers, controls and CSV work without rendering
   await page.screenshot({path:resolve('test-artifacts/dashboard-mobile.png'),fullPage:true});
 });
 
-async function settingsPage(t,profile={},search={}){
+async function settingsPage(t,profile={},search={},intelligence){
   const dir=await mkdtemp(join(tmpdir(),'job-applier-settings-')),store=await createStore(dir);
-  await store.saveConfig({profile,search});
+  await store.saveConfig({profile,search,...(intelligence?{intelligence}:{})});
   const runner={getStatus:()=>({state:'idle',todayCount:0,message:'Ready',currentJob:null}),stop:async()=>{}};
   const app=await createApp({dataDir:dir,store,runner,port:0});await app.listen();
   const browser=await chromium.launch({headless:true}),page=await browser.newPage();
@@ -73,6 +73,46 @@ async function settingsPage(t,profile={},search={}){
   await page.waitForFunction(()=>!document.querySelector('#save-settings').disabled);
   return {store,page};
 }
+
+test('browser: matching settings round-trip with reviewed facts and editable family searches',async t=>{
+  const {store,page}=await settingsPage(t);
+  assert.equal(await page.getByLabel('Enable intelligent matching',{exact:true}).isChecked(),false);
+  await page.getByLabel('Enable intelligent matching',{exact:true}).check();
+  await page.getByLabel('Minimum fit score',{exact:true}).fill('60');
+  await page.getByLabel('Confirmed skills',{exact:true}).fill('JS\nPython');
+  await page.getByLabel('Professional experience in years',{exact:true}).fill('0');
+  await page.getByLabel('Currently a student',{exact:true}).selectOption('false');
+  await page.getByLabel('Software engineering',{exact:true}).check();
+  await page.getByLabel('Titles for Software engineering',{exact:true}).fill('Software Engineer Intern\nSoftware Developer Intern');
+  await page.getByRole('button',{name:'Add search region',exact:true}).click();
+  await page.getByLabel('Search region 1',{exact:true}).fill('Houston, TX, USA');
+  await page.getByLabel('Priority for region 1',{exact:true}).fill('10');
+  await page.getByRole('button',{name:'Add search region',exact:true}).click();
+  await page.getByLabel('Search region 2',{exact:true}).fill('United States');
+  await page.getByLabel('Workplace for region 2',{exact:true}).selectOption('remote');
+  await page.getByRole('button',{name:'Save settings',exact:true}).click();await page.getByText('Settings saved',{exact:true}).waitFor();
+  const config=await store.getConfig();assert.equal(config.intelligence.minimumFitScore,60);assert.equal(config.intelligence.candidate.student,false);assert.equal(config.intelligence.candidate.professionalYears,0);assert.deepEqual(config.intelligence.candidate.skills,['javascript','python']);assert.equal(config.intelligence.regions.length,2);assert.deepEqual(await store.getAnswers(),{});
+  await page.reload();await page.getByRole('button',{name:'Settings',exact:true}).click();
+  assert.equal(await page.getByLabel('Minimum fit score',{exact:true}).inputValue(),'60');assert.equal(await page.getByLabel('Currently a student',{exact:true}).inputValue(),'false');assert.equal(await page.getByLabel('Confirmed skills',{exact:true}).inputValue(),'JavaScript\nPython');
+  await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/phase1-settings-desktop.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve('test-artifacts/phase1-settings-mobile.png'),fullPage:true});
+});
+test('browser: unrelated settings saves preserve unknown skills until the user confirms an empty list',async t=>{
+  const {store,page}=await settingsPage(t);
+  await page.getByLabel('First name',{exact:true}).fill('New draft');await page.getByRole('button',{name:'Save settings',exact:true}).click();await page.getByText('Settings saved',{exact:true}).waitFor();
+  assert.equal((await store.getConfig()).intelligence.candidate.skills,null);
+  await page.getByLabel('I have reviewed my skills',{exact:true}).check();await page.getByRole('button',{name:'Save settings',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('#save-settings').disabled);assert.deepEqual((await store.getConfig()).intelligence.candidate.skills,[]);
+});
+test('browser: fit result exposes its score, matched skills and uncertainty without implying submission',async t=>{
+  const {store,page}=await settingsPage(t);
+  await store.createRecord({id:'1001',title:'Synthetic internship',company:'Example',assessment:{decision:'review',score:85,band:'Excellent',factors:[{key:'skills',earned:25,max:25,evidence:'Required: Python',unknown:false}],matchedSkills:['python'],missingSkills:['git'],uncertainties:['Student status is unknown'],reasons:[{code:'eligibility_review',message:'Review required student status'}]}},'skipped');
+  await page.reload();await page.locator('#recent-body').getByText('Fit: 85/100',{exact:true}).waitFor();await page.locator('#recent-body').getByText('Why this fit',{exact:true}).click();
+  assert.equal(await page.locator('#recent-body').getByText('Student status is unknown',{exact:true}).isVisible(),true);
+  assert.match(await page.locator('#recent-body').textContent(),/Matched skills: Python/);
+  assert.match(await page.locator('#recent-body').textContent(),/Missing skills: Git/);
+  assert.match(await page.locator('#recent-body').textContent(),/Required: Python/);
+});
 
 test('browser: phone country answers support typing, visible matching choices, keyboard selection and exact saved labels',async t=>{
   const {store,page}=await settingsPage(t);
@@ -287,10 +327,15 @@ test('browser: résumé keyword recommendations are opt-in and preserve unsaved 
   assert.equal(await page.getByRole('combobox',{name:'Keyword matching',exact:true}).inputValue(),'any');
   assert.match(await page.locator('#toast').textContent(),/Save settings/);
   assert.deepEqual((await store.getConfig()).search.includeKeywords,['Remote']);
+  assert.equal((await store.getConfig()).intelligence.candidate.skills,null);
+  await page.getByRole('button',{name:'Add selected skills',exact:true}).click();
+  assert.equal(await page.getByLabel('Confirmed skills',{exact:true}).inputValue(),'Python\nSQL');
+  assert.equal((await store.getConfig()).intelligence.candidate.skills,null);
   await page.getByRole('button',{name:'Save settings',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Settings saved'&&!document.querySelector('#save-settings').disabled);
   const config=await store.getConfig();
   assert.equal(config.profile.firstName,'Unsaved');
+  assert.deepEqual(config.intelligence.candidate.skills,['python','sql']);
   assert.deepEqual(config.search.titles,['Backend Engineer']);
   assert.deepEqual(config.search.includeKeywords,['python','Kubernetes','SQL']);
   assert.deepEqual(config.search.excludeKeywords,['Contract']);

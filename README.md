@@ -41,6 +41,46 @@ The app reads LinkedIn's job description section before checking keywords. It su
 
 PDF, DOC, and DOCX keyword extraction is included in setup. A scanned PDF needs selectable text; password-protected, damaged, or unusually complex documents may need a fresh PDF or DOCX export. Suggestion failures keep the uploaded résumé available for applications. Résumé text is processed locally and is not sent to an AI service or added to GitHub.
 
+## Intelligent matching (optional)
+
+In **Settings → Intelligent matching**, turn on **Enable intelligent matching**
+to collect a bounded scan and apply to the highest-scoring suitable jobs first.
+Existing searches keep their streaming keyword behavior until you enable it.
+
+Confirm your skills, professional years, current student status, and current or
+completed education only when you know them. Unknown facts remain unknown;
+reviewing an empty skills or clearances list explicitly means none. You can read
+your résumé and choose **Add selected skills**, then **Save settings** to confirm
+those choices. **Add selected keywords** still edits search preferences separately.
+Neither action creates screening or legal answers.
+
+Choose role families and edit their titles, keep your own Job titles, and add
+search regions with priorities from 0 to 10. For remote searches, use an actual
+geographic location (for example United States) and choose Remote as its workplace.
+Up to 50 title/region queries are supported. Queries share the scan limit fairly;
+the scan limit may be too small to cover every query.
+
+The default minimum fit score is 70. The rubric weights role (20), technical
+skills (25), experience (15), education/student status (10), location (10), posting
+age (10), Easy Apply (5), and interests (5). Unknown factors receive half their
+points, but unknown required eligibility still requires review. Required skills
+count three times as much as preferred skills. Lowering the minimum below 70
+allows Borderline jobs; scores below 55 remain skipped. This score is a ranking
+rubric, not a hiring probability. Include keywords become interests in this mode;
+excluded terms and companies remain hard rules.
+
+Results show **Fit** and **Why this fit**, including points, skill gaps and
+uncertainties. Recognized unpaid, commission-only or incompatible required roles
+can be excluded before scoring. Strong reposts need matching company, equivalent
+title, known location and description; prior submitted or uncertain attempts
+block another attempt. Unattempted failures can be retried. An unreadable posting
+halts the run before queued jobs are applied.
+
+English parsing and synthetic browser tests cannot cover every employer wording
+or LinkedIn layout. Unknown eligibility and weaker duplicate similarity need
+review. These changes do not fix LinkedIn form-entry timeouts; those remain in
+Phase 2.
+
 ## Results
 
 - **Submitted:** observed LinkedIn confirmation after Submit.
