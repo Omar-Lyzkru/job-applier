@@ -87,6 +87,68 @@ test('pending operational blockers remain visible after their answer is saved',a
   assert.equal((await (await fetch(app.url+'/api/bootstrap')).json()).questions.length,0);
 });
 
+test('saving an answer exposes its raw value for a retained radio blocker across restarts',async t=>{
+  const dir=await mkdtemp(join(tmpdir(),'job-applier-saved-blocker-'));
+  const store=await createStore(dir);
+  const runner={getStatus:()=>({state:'idle',message:'Ready',todayCount:0}),stop:async()=>{}};
+  let app=await createApp({dataDir:dir,store,runner,port:0});await app.listen();
+  t.after(async()=>{await app.close();await rm(dir,{recursive:true,force:true});});
+  const question={key:'evening work',label:'Are you available for evening work?',type:'radio',required:true,
+    options:[{label:'Yes',value:'1'},{label:'No',value:'0'}],jobId:'3001',blocker:'operational',reason:'Could not select the saved option'};
+  await store.saveQuestions([question]);
+  const initial=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.equal(Object.hasOwn(initial.questions[0],'savedAnswer'),false);
+  const response=await fetch(app.url+'/api/answers',{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':initial.token},
+    body:JSON.stringify({'Are you available for evening work?':'No'})});
+  assert.equal(response.status,200);
+  const saved=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.equal(saved.questions.length,1);
+  assert.deepEqual(saved.questions[0].savedAnswer,{answer:'No',displayAnswer:'No',sourceQuestion:'are you available for evening work',match:'exact',source:'saved answer'});
+  assert.equal(saved.questions[0].blocker,'operational');
+  assert.equal(saved.questions[0].reason,'Could not select the saved option');
+  assert.deepEqual(await store.getQuestions(),[question],'Display metadata does not modify the stored question');
+  await app.close();
+  app=await createApp({dataDir:dir,runner,port:0});await app.listen();
+  const reloaded=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.deepEqual(reloaded.questions[0].savedAnswer,{answer:'No',displayAnswer:'No',sourceQuestion:'are you available for evening work',match:'exact',source:'saved answer'});
+  assert.equal(reloaded.questions[0].reason,'Could not select the saved option');
+  assert.deepEqual(reloaded.answers,{'are you available for evening work':'No'});
+});
+
+test('retained radio blockers display the resolved option label while preserving the raw saved answer',async t=>{
+  const {store,app,send}=await setup(t);
+  await store.saveQuestions([{key:'evening work',label:'Are you available for evening work?',type:'radio',required:true,
+    options:[{label:'Yes',value:'on'},{label:'No',value:'off'}],blocker:'operational',reason:'Could not select the saved option'}]);
+  assert.equal((await send('/api/answers',{'Are you available for evening work?':'Yes!'})).status,200);
+  const data=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.deepEqual(data.questions[0].savedAnswer,{answer:'Yes!',displayAnswer:'Yes',sourceQuestion:'are you available for evening work',match:'exact',source:'saved answer'});
+  assert.equal(data.answers['are you available for evening work'],'Yes!');
+});
+
+test('retained checkbox blockers display false for a saved zero string',async t=>{
+  const {store,app,send}=await setup(t);
+  await store.saveQuestions([{key:'agree',label:'Agree',type:'checkbox',required:true,options:[],
+    blocker:'operational',reason:'The required checkbox needs an explicit yes answer'}]);
+  assert.equal((await send('/api/answers',{Agree:'0'})).status,200);
+  const data=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.deepEqual(data.questions[0].savedAnswer,{answer:'0',displayAnswer:false,sourceQuestion:'agree',match:'exact',source:'saved answer'});
+  assert.equal(data.questions[0].reason,'The required checkbox needs an explicit yes answer');
+  assert.equal(data.answers.agree,'0');
+});
+
+test('an incompatible saved radio answer remains a suggestion for an operational blocker',async t=>{
+  const {store,app,send}=await setup(t);
+  await store.saveQuestions([{key:'shift preference',label:'Shift preference',type:'radio',required:true,
+    options:[{label:'Morning',value:'am'},{label:'Evening',value:'pm'}],blocker:'operational',reason:'Could not select the saved option'}]);
+  assert.equal((await send('/api/answers',{'Shift preference':'Flexible'})).status,200);
+  const data=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.equal(data.questions.length,1);
+  assert.equal(Object.hasOwn(data.questions[0],'savedAnswer'),false);
+  assert.equal(data.questions[0].blocker,'operational');
+  assert.equal(data.questions[0].reason,'Could not select the saved option');
+  assert.ok(data.questions[0].suggestions.some(suggestion=>suggestion.question==='shift preference'&&suggestion.answer==='Flexible'));
+});
+
 test('answer memory prepares common questions from saved answers without inventing authorization or sponsorship',async t=>{
   const {store,app}=await setup(t);
   await store.saveAnswers({School:'University of Houston','Degree Type':"Bachelor's Degree",Major:'Computer Science/IT'});

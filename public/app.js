@@ -245,8 +245,14 @@ function renderQuestions(){
     const job=state.history.find(record=>record.job.id===question.jobId)?.job;
     const context=create('p');if(job){context.append(jobAnchor(job,'question-job'));context.append(document.createTextNode(` · ${question.company||job.company}`));}else context.textContent=question.company?`Question from ${question.company}`:'Question from a LinkedIn application';card.append(context);
     if(question.reason)card.append(create('p',null,question.reason));
+    const savedValue=question.savedAnswer?(question.savedAnswer.displayAnswer??question.savedAnswer.answer):'';
+    if(question.savedAnswer){
+      const source=question.savedAnswer.source==='profile'?'Profile answer':'Saved answer';
+      const next=question.type==='unsupported'?'':' LinkedIn entry still needs a retry.';
+      card.append(create('p','answer-provenance',`${source}: ${answerText(savedValue)}.${next}`));
+    }
     if(question.type==='unsupported'){card.append(create('p',null,'Complete this control directly in LinkedIn. The app cannot enter it automatically.'));fragment.append(card);continue;}
-    const editor=answerEditor(question,`pending:${question.answerKey||question.key}`);appendSuggestions(card,question.suggestions,editor);card.append(editor.row);fragment.append(card);
+    const editor=answerEditor(question,`pending:${question.answerKey||question.key}`,savedValue);appendSuggestions(card,question.suggestions,editor);card.append(editor.row);fragment.append(card);
   }
   byId('pending-questions').replaceChildren(fragment);byId('questions-empty').hidden=state.questions.length>0;
 }

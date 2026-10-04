@@ -491,3 +491,71 @@ test('browser: answer suggestions reject opaque option codes and repeated choice
   }
   assert.deepEqual(await store.getAnswers(),{'department preference':'1','location preference':'Houston, TX'});
 });
+
+test('browser: saved answers remain visible on operational question cards after saving and reloading',async t=>{
+  const question={key:'are you authorized to work legally in the us',label:'Are you authorized to work legally in the US?*',type:'radio',required:true,options:[{label:'Yes',value:'on'},{label:'No',value:'on'}],jobId:'1001',company:'BGE, Inc.',blocker:'operational',reason:'Could not enter the saved answer: locator.isChecked: Timeout 10000ms exceeded.'};
+  const {store,page}=await answerMemoryPage(t,{questions:[question]});
+  const card=page.locator('.pending-question'),input=card.getByLabel(`Answer for ${question.label}`,{exact:true});
+  await input.selectOption('No');await card.getByRole('button',{name:'Save this answer',exact:true}).click();
+  await page.getByText('Answer saved',{exact:true}).waitFor();
+  assert.equal((await store.getAnswers())[question.key],'No');
+  assert.equal(await input.inputValue(),'No');
+  assert.match(await card.textContent(),/Saved answer: No/);
+  await page.reload();await page.getByRole('button',{name:'Answers',exact:true}).click();
+  assert.equal(await input.inputValue(),'No');
+  assert.match(await card.textContent(),/Saved answer: No/);
+  assert.match(await card.textContent(),/LinkedIn.*retry/i);
+  assert.equal((await store.getQuestions()).length,1);
+  await mkdir(resolve('test-artifacts'),{recursive:true});
+  await page.screenshot({path:resolve('test-artifacts/saved-pending-desktop.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.screenshot({path:resolve('test-artifacts/saved-pending-mobile.png'),fullPage:true});
+});
+
+test('browser: changing a common answer refreshes a retained equivalent question without losing another draft',async t=>{
+  const question={key:'are you authorized to work legally in the us',label:'Are you authorized to work legally in the US?*',type:'radio',required:true,options:[{label:'Yes',value:'on'},{label:'No',value:'on'}],jobId:'1001',company:'BGE, Inc.',blocker:'operational',reason:'Could not enter the saved answer: locator.isChecked: Timeout 10000ms exceeded.'};
+  const draftQuestion={key:'why this company',label:'Why this company?*',type:'text',required:true,options:[],jobId:'1002',company:'Example',blocker:'missing_answer'};
+  const {store,page}=await answerMemoryPage(t,{answers:{[authorizationKey]:'No'},questions:[question,draftQuestion]});
+  const pending=page.locator('#pending-questions'),card=pending.locator('.pending-question').filter({has:page.getByRole('heading',{name:question.label,exact:true})});
+  const input=card.getByLabel(`Answer for ${question.label}`,{exact:true}),draft=page.getByLabel(`Answer for ${draftQuestion.label}`,{exact:true});
+  await draft.fill('My unsaved reason');
+  await page.getByText('Common questions',{exact:true}).click();
+  const common=page.locator('#common-questions').getByLabel('Answer for Are you legally authorized to work in the United States?',{exact:true});
+  await common.selectOption('Yes');await common.locator('xpath=ancestor::article[1]').getByRole('button',{name:'Save this answer',exact:true}).click();
+  await page.getByText('Answer saved',{exact:true}).waitFor();
+  assert.equal((await store.getAnswers())[authorizationKey],'Yes');
+  assert.equal(await input.inputValue(),'Yes');
+  assert.match(await card.textContent(),/Saved answer: Yes/);
+  assert.equal(await draft.inputValue(),'My unsaved reason');
+  assert.equal((await store.getAnswers())[draftQuestion.key],undefined);
+});
+
+test('browser: retained question editors show saved false and zero answers without inventing choices',async t=>{
+  const questions=[{key:'willing to relocate',label:'Willing to relocate?*',type:'checkbox',required:true,options:[],jobId:'1001',blocker:'operational',reason:'Could not enter the saved answer'}, {key:'years of rust experience',label:'Years of Rust experience*',type:'number',required:true,options:[],jobId:'1001',blocker:'operational',reason:'Could not enter the saved answer'}];
+  const {page}=await answerMemoryPage(t,{answers:{'willing to relocate':false,'years of rust experience':0},questions});
+  assert.equal(await page.getByLabel('Answer for Willing to relocate?*',{exact:true}).inputValue(),'No');
+  assert.equal(await page.getByLabel('Answer for Years of Rust experience*',{exact:true}).inputValue(),'0');
+  assert.match(await page.locator('#pending-questions').textContent(),/Saved answer: No/);
+  assert.match(await page.locator('#pending-questions').textContent(),/Saved answer: 0/);
+});
+
+test('browser: retained choices display their resolved meaning rather than raw answer syntax or option codes',async t=>{
+  const questions=[{key:'willing to travel',label:'Willing to travel?*',type:'radio',required:true,options:[{label:'Yes',value:'on'},{label:'No',value:'on'}],jobId:'1001',blocker:'operational',reason:'Could not enter the saved answer'}, {key:'willing to relocate',label:'Willing to relocate?*',type:'checkbox',required:true,options:[],jobId:'1001',blocker:'operational',reason:'Could not enter the saved answer'}];
+  const {store,page}=await answerMemoryPage(t,{answers:{'willing to travel':'Yes!','willing to relocate':'0'},questions});
+  assert.equal(await page.getByLabel('Answer for Willing to travel?*',{exact:true}).inputValue(),'Yes');
+  assert.equal(await page.getByLabel('Answer for Willing to relocate?*',{exact:true}).inputValue(),'No');
+  assert.deepEqual(await store.getAnswers(),{'willing to travel':'Yes!','willing to relocate':'0'});
+});
+
+test('browser: rejected answer saves preserve the stored answer and keep the edited draft visible',async t=>{
+  const question={key:'why this company',label:'Why this company?*',type:'text',required:true,options:[],jobId:'1001',company:'Example',blocker:'operational',reason:'Could not enter the saved answer'};
+  const {store,page}=await answerMemoryPage(t,{answers:{'why this company':'Original response'},questions:[question]});
+  const card=page.locator('.pending-question'),input=card.getByLabel(`Answer for ${question.label}`,{exact:true}),draft='x'.repeat(10001);
+  await input.fill(draft);await card.getByRole('button',{name:'Save this answer',exact:true}).click();
+  await page.getByText('Answer is too long',{exact:true}).waitFor();
+  assert.equal((await store.getAnswers())[question.key],'Original response');
+  assert.equal(await input.inputValue(),draft);
+  assert.match(await card.textContent(),/Saved answer: Original response/);
+  assert.equal(await page.locator('#toast').evaluate(element=>element.classList.contains('error')),true);
+});

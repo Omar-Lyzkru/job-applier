@@ -275,6 +275,35 @@ their stored contents were verified unchanged after startup. A browser check
 confirmed the existing common answers, blank separate authorization/sponsorship
 choices, and employer-specific text message setup.
 
+## Saved answers on pending questions — 2026-10-04
+
+The reported Save issue was reproduced as a display problem. Answers were
+durable, but operational pending cards initialized their editors blank and did
+not reflect answer changes when the stored pending record stayed unchanged.
+Bootstrap now derives compatible saved-answer metadata, including the displayed
+choice label, without changing stored questions. Pending cards show that value
+and distinguish a saved answer from a LinkedIn entry failure that still needs a
+retry. Unsaved drafts retain precedence and clear only after a successful save.
+False checkbox answers, numeric zero, and normalized choice labels remain
+visible. Incompatible saved choices remain suggestions.
+
+Regressions failed before the fix and passed afterward. Fresh complete suites
+pass: **91 unit/API tests and 103 browser scenarios**. Coverage includes Save
+followed by immediate refresh and reload, changes through Common questions,
+unrelated draft preservation, canonical choice labels, false/zero answers, and
+rejected saves retaining both the draft and previous durable answer. Syntax and
+Git whitespace checks pass; desktop and mobile screenshots were inspected
+without overflow. Independent review found no remaining issue in this scope.
+
+The idle local app was restarted with private backups. Config, answers, pending
+questions, and history were verified byte-for-byte unchanged after startup.
+The updated bootstrap exposes saved-answer values for all 35 currently visible
+pending cards and retains all 19 saved answers. This change does not group
+repeated cards or repair the separate live LinkedIn radio-entry timeout.
+The final read-only browser check confirmed populated pending fields and the
+saved-answer/retry status on the running app; no answers or applications were
+changed during that check.
+
 ## Execution record
 
 # SDD ledger — plan: docs/superpowers/plans/2026-10-01-linkedin-easy-apply.md

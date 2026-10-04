@@ -65,6 +65,7 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
           question.answerKey=savedAnswerKey(question);
           const resolution=resolveAnswer(question,config.profile,answers);
           question.suggestions=resolution.suggestions||[];
+          if(resolution.kind==='fill')question.savedAnswer={answer:resolution.answer,displayAnswer:resolution.optionLabel??resolution.value,sourceQuestion:resolution.sourceQuestion,match:resolution.match,source:resolution.source};
           if(resolution.manual){question.type='unsupported';question.blocker='operational';question.reason=resolution.reason;}
           // Saving an answer only resolves missing information. Entry/verification
           // failures remain pending until a later successful application clears them.

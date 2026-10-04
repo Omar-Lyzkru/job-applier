@@ -58,6 +58,8 @@ Résumé uploads support both file fields and LinkedIn's newer **Upload resume**
 
 In **Answers**, choice questions such as **Phone country code** let you type to filter the offered choices and view the matching list. Click a choice or use the arrow keys and Enter, then **Save this answer**. Exact typed labels also save; partial names must be selected from the list. The saved answer uses LinkedIn's displayed label rather than its internal option value.
 
+Pending questions show the saved answer after saving or reloading. If LinkedIn could not enter it, the card keeps its failure reason and explains that entry needs a retry; this does not mean the answer was lost. Unsaved edits stay in the field if saving fails.
+
 **Common questions** includes school, degree, major, graduation, position, location, department, address, US work authorization, and US visa sponsorship. The app reuses your saved answers for recognized equivalent wording and shows the original saved question. Work authorization and sponsorship remain separate. Conflicting answers, uncertain wording, unavailable choices, and incompatible graduation date formats need your review. A suggested answer is saved only after you choose it and press Save.
 
 **Text message consent** is saved separately for each employer. Choose an employer and explicitly answer Yes or No; neither is selected for you. Consent for application updates does not answer a differently worded marketing, calling, or negative consent question. Unknown employers require completion directly in LinkedIn.
