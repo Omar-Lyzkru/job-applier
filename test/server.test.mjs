@@ -18,6 +18,18 @@ async function setup(t){
   const upload=(filename,body)=>fetch(app.url+'/api/resume',{method:'POST',headers:{'X-App-Token':bootstrap.token,'X-Filename':encodeURIComponent(filename),'Content-Type':'application/octet-stream'},body});
   return {dir,store,app,bootstrap,send,upload,commands};
 }
+
+test('API retains matching settings on save and rejects oversized expanded queries',async t=>{
+  const {app,send}=await setup(t);
+  assert.equal((await send('/api/config',{intelligence:{enabled:true,minimumFitScore:60,candidate:{student:false,professionalYears:0,skills:['JS']},roleFamilies:['web'],regions:[{name:'United States',priority:8,workplace:'remote'}]}})).status,200);
+  const bootstrap=await (await fetch(app.url+'/api/bootstrap')).json();
+  assert.equal(bootstrap.config.intelligence.minimumFitScore,60);
+  assert.deepEqual(bootstrap.config.intelligence.candidate.skills,['javascript']);
+  assert.equal(bootstrap.config.intelligence.candidate.student,false);
+  assert.deepEqual(bootstrap.answers,{});
+  const response=await send('/api/config',{search:{titles:Array.from({length:26},(_,i)=>`Role ${i}`)},intelligence:{enabled:true,regions:[{name:'United States',priority:10,workplace:'remote'},{name:'Canada',priority:5,workplace:'remote'}]}});
+  assert.equal(response.status,400);assert.match((await response.json()).error,/50/);
+});
 test('API persists settings and normalized answers and dispatches controls',async t=>{
   const {app,send,commands}=await setup(t);
   assert.equal((await send('/api/config',{profile:{email:'me@example.com'},search:{titles:['Engineer'],location:'Chicago'}})).status,200);

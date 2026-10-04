@@ -1,4 +1,6 @@
 import {normalizeQuestion,findSavedAnswer} from './answer-memory.mjs';
+import {defaultIntelligenceConfig,validateIntelligence} from './intelligence-config.mjs';
+import {buildSearchQueries} from './search-profiles.mjs';
 export {normalizeQuestion} from './answer-memory.mjs';
 
 const profileKeys = ['firstName','lastName','email','phone','city','state','postalCode','country','linkedinUrl','website'];
@@ -18,7 +20,7 @@ export function defaultConfig() {
   return {
     profile:Object.fromEntries(profileKeys.map(key=>[key,''])),
     search:{titles:[],location:'',workplace:'any',experienceLevels:[],includeKeywords:[],excludeKeywords:[],keywordMatch:'all'},
-    dailyCap:10, scanLimit:100, intervalSeconds:45, timezone:'America/Chicago', resume:null, dryRun:false
+    dailyCap:10, scanLimit:100, intervalSeconds:45, timezone:'America/Chicago', resume:null, dryRun:false,intelligence:defaultIntelligenceConfig()
   };
 }
 function object(value,name) {
@@ -100,6 +102,8 @@ export function validateConfig(input,{profileLinks=true}={}) {
     config.resume = {path:string(resume.path,'Résumé path',4000),filename,size:integer(resume.size,'Résumé size',1,MAX_RESUME_BYTES)};
     if (!config.resume.path) throw new Error('Missing résumé path');
   }
+  if(input.intelligence!==undefined)config.intelligence=validateIntelligence(input.intelligence);
+  if(config.intelligence.enabled)buildSearchQueries(config.search,config.intelligence);
   return config;
 }
 export function readiness(config) {
@@ -107,8 +111,11 @@ export function readiness(config) {
   if (!config.profile.firstName || !config.profile.lastName) missing.push('Enter your first and last name');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.profile.email)) missing.push('Enter a valid email');
   if (!config.profile.phone) missing.push('Enter your phone number');
-  if (!config.search.titles.length) missing.push('Add at least one job title');
-  if (!config.search.location) missing.push('Enter a search location');
+  if(config.intelligence?.enabled){if(!buildSearchQueries(config.search,config.intelligence).length)missing.push('Choose a role family or title and a search region');}
+  else{
+    if (!config.search.titles.length) missing.push('Add at least one job title');
+    if (!config.search.location) missing.push('Enter a search location');
+  }
   if (!config.resume) missing.push('Upload a résumé');
   return missing;
 }

@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {extractSkills} from './skills.mjs';
 import {countries} from '../public/locations.js';
+import {classifyRoleFamily} from './search-profiles.mjs';
 
 export const normalizeText=value=>String(value??'').normalize('NFKC').replace(/[\u2010-\u2015\u2212]/g,'-').replace(/\s+/g,' ').trim().toLowerCase();
 const normalizedCountry=value=>/^(us|usa|u\.s\.?|united states(?: of america)?)$/.test(value)?'united states':/^(uk|u\.k\.?|united kingdom)$/.test(value)?'united kingdom':value;
@@ -70,7 +71,7 @@ export function normalizeJob(candidate,details,{now=new Date()}={}){
   const range=pay?{min:Number(pay[1].replaceAll(',','')),max:Number(pay[2].replaceAll(',','')),unit:/hour|hr/i.test(pay[3])?'hour':'year',currency:'USD'}:null;
   const title=normalizeText(candidate.title),senior=/\b(?:senior|sr\.?|staff|principal|director|executive|chief)\b/.test(title);
   return {...candidate,description,normalizedTitle:title,normalizedCompany:normalizeText(candidate.company),descriptionHash:description.trim()?createHash('sha256').update(normalizeText(description)).digest('hex'):null,
-    familyId:null,experienceLevel:senior?'senior':/\b(?:intern|internship)\b/.test(title)?'internship':/\b(?:junior|jr|entry.level|graduate)\b/.test(title)?'entry':null,
+    familyId:classifyRoleFamily(candidate.title),experienceLevel:senior?'senior':/\b(?:intern|internship)\b/.test(title)?'internship':/\b(?:junior|jr|entry.level|graduate)\b/.test(title)?'entry':null,
     employmentType:/\binternship\b/.test(text+' '+title)?'internship':/\bpart-time\b/.test(text)?'part_time':/\bfull-time\b/.test(text)?'full_time':/\bcontract(?:or)?\b/.test(text)?'contract':null,
     location:normalizeLocation(details.location,details.workplace),skills,requirements,
     compensation:{unpaid:/\b(?:unpaid|uncompensated)\b/.test(text)&&!/\b(?:not unpaid|no unpaid)\b/.test(text),commissionOnly:/\bcommission(?:-| )only\b|\b100% commission\b/.test(text)&&!/\b(?:base (?:pay|salary)|plus commission|not commission-only)\b/.test(text),range:range&&range.max>=range.min?range:null},

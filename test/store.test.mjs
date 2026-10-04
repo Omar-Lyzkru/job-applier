@@ -13,6 +13,17 @@ async function temporary(t) {
   return dir;
 }
 
+test('intelligent matching facts survive resume updates and store reopen without becoming screening answers',async t=>{
+  const dir=await temporary(t),store=await createStore(dir);
+  await store.saveConfig({intelligence:{enabled:true,candidate:{skills:[],student:false,professionalYears:0,clearances:[]},roleFamilies:['swe']}});
+  await store.saveResume({path:'/tmp/synthetic.pdf',filename:'synthetic.pdf',size:10});
+  await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());
+  const config=await reopened.getConfig();
+  assert.equal(config.intelligence.enabled,true);assert.deepEqual(config.intelligence.candidate.skills,[]);
+  assert.equal(config.intelligence.candidate.student,false);assert.equal(config.intelligence.candidate.professionalYears,0);
+  assert.deepEqual(await reopened.getAnswers(),{});
+});
+
 test('settings and answers survive a restart without shared mutable references', async t => {
   const dir = await temporary(t);
   const store = await createStore(dir);
