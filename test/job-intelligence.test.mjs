@@ -27,6 +27,48 @@ test('skill aliases preserve language boundaries and reject domains and ambiguou
 const matching=(patch={})=>validateConfig({search:{titles:['Software Engineer'],location:'Houston, TX, USA',experienceLevels:['INTERNSHIP']},intelligence:{enabled:true,candidate:{skills:['Python','Git','AWS'],professionalYears:0,student:true,currentEducation:{degree:'bachelor',major:'Computer Science'}},roleFamilies:['swe'],regions:[{name:'Houston, TX, USA',priority:10,workplace:'any'}],...patch}});
 const factor=(assessment,key)=>assessment.factors.find(f=>f.key===key);
 
+test('restrictive legal conditions require review independently of section headings',()=>{
+  for(const restriction of ['We cannot provide visa sponsorship.','We do not provide visa sponsorship.','Visa sponsorship is not available.','US citizens only.']){
+    for(const description of [`${restriction}\nRequired: Python`,`Preferred qualifications:\n${restriction}\nRequired: Python`]){
+      const job=parse(description,{location:'Houston, TX, USA',postedAge:'1 hour ago'}),legal=job.requirements.find(r=>r.kind==='eligibility');
+      assert.equal(legal?.required,true,description);assert.equal(legal.evidence,restriction);
+      const assessed=evaluateJob(job,matching(),{now});assert.equal(assessed.decision,'review');assert.ok(assessed.reasons.some(r=>r.code==='eligibility_review'));
+    }
+  }
+});
+test('explicitly waived legal qualifications do not become restrictive conditions',()=>{
+  for(const waiver of ['US citizenship is not required.','We do not require US citizenship.']){
+    const job=parse(`Required: Python\n${waiver}`,{location:'Houston, TX, USA',postedAge:'1 hour ago'});assert.equal(job.requirements.find(r=>r.kind==='eligibility')?.required,false,waiver);assert.equal(evaluateJob(job,matching(),{now}).decision,'apply');
+  }
+});
+test('explicit applicant experience is retained when the sentence also mentions the team',()=>{
+  for(const line of ['You must have 3 years of professional experience to join our team.','Applicants must have 3 years of professional experience to work with our colleagues.']){
+    const job=parse(`${line}\nRequired: Python`,{location:'Houston, TX, USA',postedAge:'1 hour ago'});
+    assert.equal(job.requirements.find(r=>r.kind==='years')?.value,3);assert.equal(evaluateJob(job,matching(),{now}).decision,'skip');
+  }
+  for(const line of ['Our team has 8 years of professional experience.','You will be mentored by engineers with 8 years of experience.'])assert.equal(parse(`Requirements:\n${line}`).requirements.some(r=>r.kind==='years'),false);
+});
+test('multiline preferred and optional experience stays soft despite minimum wording',()=>{
+  for(const heading of ['Preferred qualifications:','Nice to have:','Optional:']){
+    const job=parse(`Required: Python\n${heading}\nAt least 2 years of professional experience`,{location:'Houston, TX, USA',postedAge:'1 hour ago'});
+    const years=job.requirements.find(r=>r.kind==='years');assert.equal(years?.required,false,heading);
+    const assessment=evaluateJob(job,matching(),{now});assert.notEqual(assessment.score,null);assert.equal(assessment.reasons.some(r=>r.code==='experience_conflict'),false);assert.equal(assessment.decision,'apply');
+  }
+});
+test('partially parsed geography cannot suppress postings in different cities',()=>{
+  const london=parse('Required: Python',{location:'London, Greater London, United Kingdom'}),manchester={...parse('Required: Python',{location:'Manchester, Greater Manchester, United Kingdom'}),id:'1002'};
+  assert.equal(london.location.country,'united kingdom');assert.equal(jobFingerprint(london),null);assert.equal(jobFingerprint(manchester),null);
+  assert.equal(blockingDuplicate(manchester,[{job:london,status:'submitted',attemptedAt:'2026-10-04T10:00:00Z'}]),null);
+  assert.equal(jobFingerprint(parse('Required: Python',{location:'Somewhere, Unrecognized Province, United States'})),null);
+  assert.ok(jobFingerprint(parse('Required: Python',{location:'United Kingdom'})));
+});
+test('unpaid benefits and unrelated wording do not label compensated jobs unpaid',()=>{
+  for(const line of ['Benefits:\nPaid vacation and optional unpaid leave.','Benefits:\nUnpaid parental leave is available.','Responsibilities:\nTrack unpaid invoices.','This is not an unpaid internship.']){
+    const job=parse(`Required: Python\n${line}`,{location:'Houston, TX, USA',postedAge:'1 hour ago'});assert.equal(job.compensation.unpaid,false,line);assert.equal(evaluateJob(job,matching(),{now}).decision,'apply');
+  }
+  for(const line of ['Unpaid internship','This internship is unpaid.','Compensation: Unpaid','Uncompensated role'])assert.equal(parse(line).compensation.unpaid,true,line);
+});
+
 test('matching config preserves reviewed empty, zero, false and unknown facts and rejects invalid input',()=>{
   assert.equal(defaultIntelligenceConfig().enabled,false);
   const config=validateIntelligence({candidate:{skills:[],professionalYears:0,student:false,clearances:null}});

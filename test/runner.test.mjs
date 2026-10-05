@@ -42,6 +42,11 @@ async function setup(t,{count=3,outcome='submitted',outcomes={},config={},before
 }
 
 const matchingConfig={intelligence:{enabled:true,minimumFitScore:70,candidate:{skills:['Python']},roleFamilies:['swe']}};
+test('ranked runner never attempts an unsectioned legal restriction or applicant experience conflict',async t=>{
+  const {runner,observed,jobs,store}=await setup(t,{count:2,config:{...matchingConfig,intelligence:{...matchingConfig.intelligence,candidate:{skills:['Python'],professionalYears:0}}},descriptions:{1001:'We cannot provide visa sponsorship.\nRequired: Python',1002:'You must have 3 years of professional experience to join our team.\nRequired: Python'},details:{1001:{location:'Houston, TX, USA',postedAge:'1 hour ago'},1002:{location:'Houston, TX, USA',postedAge:'1 hour ago'}}});
+  jobs.forEach(job=>job.title='Software Engineer Intern');await runner.start();await runner.waitForIdle();
+  assert.equal(observed.applications.length,0);const history=await store.getHistory();assert.equal(history.some(record=>record.attemptedAt),false);assert.equal(history[0].job.assessment.decision,'review');assert.equal(history[1].job.assessment.score,null);
+});
 test('runner collects the bounded scan before inspection and applies the highest fit first',async t=>{
   const {runner,observed,jobs,store}=await setup(t,{count:2,config:matchingConfig,descriptions:{1001:'Required: Python and Git',1002:'Required: Python'}});
   jobs.forEach(j=>j.title='Software Engineer Intern');await runner.start();await runner.waitForIdle();
