@@ -12,7 +12,7 @@ const aliases = {
   'linkedin profile':'linkedinUrl', 'linkedin profile url':'linkedinUrl',
   'website':'website', 'portfolio':'website', 'personal website':'website'
 };
-export const statuses = new Set(['skipped','needs_answer','ready','submission_pending','submitted','unconfirmed','failed']);
+export const statuses = new Set(['skipped','needs_answer','ready','submission_pending','submitted','unconfirmed','failed','queued','inspecting','filling','needs_attention','interrupted']);
 export const MAX_RESUME_BYTES = 2_000_000;
 const experienceLevelCodes=new Set(['INTERNSHIP','ENTRY_LEVEL','ASSOCIATE','MID_SENIOR_LEVEL','DIRECTOR','EXECUTIVE']);
 
