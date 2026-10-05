@@ -213,7 +213,10 @@ pending occurrences include their record/lineage identity. Missing legacy
 question details are an explicit unknown blocker, not proof that no answer is
 needed. Orphan questions remain visible/editable; no usable numeric LinkedIn job
 identity means targeted retry is unavailable. Unknown or operational failures
-require an explicit single-job retry, not automatic inclusion in the ready batch.
+require an explicit single-job retry to enter targeted resume, not automatic
+inclusion in the ready batch. An explicit new search can also rediscover an
+unattempted job and recheck it under current rules, preserving Phase 1's retry
+behavior. Restart and answer saving never begin either kind of application run.
 
 Derive the latest relevant lineage/job outcome from full history. A later
 submitted or uncertain attempt suppresses all older automatic retry actions for
@@ -237,6 +240,12 @@ Answers/History. It shows job/company, current phase, concrete blocker, associat
 question link, last update, retry eligibility/explanation, and the original
 LinkedIn job link. Counts come from full history, independently of the latest
 200 history rows. Grouped editors continue to live on Answers.
+
+Keep Recent Applications useful when jobs are queued in bulk: choose displayed
+history rows by their latest outcome/update time, with stable legacy fallbacks,
+while keeping canonical history array order unchanged for conservative legacy
+question association. This preserves the existing recent-results purpose; it
+does not add the deferred analytics or personal-ATS features.
 
 Provide "Retry this application" and "Resume ready applications" actions with
 the same visible dry-run choice as ordinary Start. Saving an answer never starts
