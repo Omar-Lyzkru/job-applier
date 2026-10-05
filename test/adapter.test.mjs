@@ -197,11 +197,11 @@ test('browser: page counters do not hide busy forms or upload/loading progress',
   for(const scenario of ['page-progress-busy','upload-progress','indeterminate-progress','unrelated-page-counter']){
     const {adapter,fixture,options}=await setup(t,scenario,{action:700});
     const result=await adapter.apply({...job},options);
-    assert.equal(result.status,'paused',scenario+': '+JSON.stringify(result));
+    assert.equal(result.status,'failed',scenario+': '+JSON.stringify(result));
     assert.match(result.reason,/form.*loading/);
     assert.deepEqual(fixture.state.events,[]);
-    const page=await adapter.openBrowser();
-    assert.equal(await page.getByRole('dialog').locator('input[name=first]').inputValue(),'','A loading form was filled');
+    assert.equal(result.blockers[0].code,'form_changed');assert.equal(result.cleanup.confirmed,true);
+    assert.deepEqual(fixture.state.entries,[],'A loading form was filled');
   }
 });
 test('browser: unfamiliar safety warning pauses without choosing or dismissing it',async t=>{
@@ -536,3 +536,33 @@ test('browser: failed feed navigation is retried by the next open',async t=>{
   assert.equal(new URL(page.url()).pathname,'/feed/');
   assert.equal(await page.getByRole('heading',{name:'Feed'}).isVisible(),true);
 });
+
+for(const scenario of ['identical-text-next','ignored-next-once'])test(`browser: reliable ${scenario} advances and submits once`,async t=>{
+ const {adapter,fixture,options}=await setup(t,scenario,{action:1000});const progress=[];const result=await adapter.apply(job,{...options,onProgress:async p=>progress.push(structuredClone(p))});assert.equal(result.status,'submitted',JSON.stringify(result));assert.deepEqual(fixture.state.events,['guard','submit']);
+ if(scenario==='identical-text-next')assert.deepEqual(fixture.state.advances.map(a=>a.step),[1,2,3]);else{assert.equal(fixture.state.advances.filter(a=>a.step===2).length,2);assert.ok(progress.some(p=>Object.values(p.retryCounters.pages).some(n=>n===1)));}
+});
+test('browser: an ignored Next has one safe retry and then a scoped failure',async t=>{
+ const {adapter,fixture,options}=await setup(t,'ignored-next-always',{action:700});const result=await adapter.apply(job,options);assert.equal(fixture.state.advances.filter(a=>a.step===2).length,2);assert.equal(result.blockers[0].code,'form_changed');assert.equal(result.cleanup.confirmed,true);assert.equal(fixture.state.submissions.length,0);
+});
+test('browser: validation is not progress and its echo never enters diagnostics',async t=>{
+ const {adapter,fixture,options}=await setup(t,'next-validation',{action:700});const result=await adapter.apply(job,options);assert.equal(result.blockers[0].code,'validation');assert.equal(fixture.state.advances.filter(a=>a.step===2).length,1);assert.equal(fixture.state.submissions.length,0);assert.equal(JSON.stringify(result.diagnostic).includes('private-test-secret'),false);
+});
+test('browser: Stop during unchanged busy transition does not click Next again',async t=>{
+ const {adapter,fixture,options}=await setup(t,'next-busy',{action:1600});const controller=new AbortController(),gate=Promise.withResolvers();fixture.state.beforeAdvance=async event=>{if(event.step===2)gate.resolve();};const run=adapter.apply(job,{...options,signal:controller.signal});await Promise.race([gate.promise,run.then(result=>{throw new Error('Application finished before busy step: '+JSON.stringify(result));})]);controller.abort();const result=await run;assert.equal(fixture.state.advances.filter(a=>a.step===2).length,1);assert.equal(fixture.state.submissions.length,0);assert.match(result.reason,/Stopped/);
+});
+for(const scenario of ['field','resume'])test(`browser: ${scenario} change during guard prevents the final click`,async t=>{
+ const {adapter,fixture,options}=await setup(t);const result=await adapter.apply(job,{...options,beforeSubmit:async context=>{
+  const page=await adapter.openBrowser();await page.evaluate(scenario=>{const root=document.querySelector('[role=dialog]');root.insertAdjacentHTML('beforeend',scenario==='field'?'<label>New required*<input required></label>':'<section class="jobs-document-upload"><fieldset><legend>Resume</legend><label><input type="radio" name="changed-document" checked>old-resume.pdf</label></fieldset></section>');},scenario);await context?.validateReady?.();
+ }});assert.equal(fixture.state.submissions.length,0);assert.ok(result.blockers.some(b=>b.code===(scenario==='field'?'missing_answer':'resume_upload')));
+});
+test('browser: cleanup failure retains the original missing questions and adds its own blocker',async t=>{
+ const {adapter,fixture,options}=await setup(t,'stuck-cleanup');const result=await adapter.apply(job,{...options,answers:{}});assert.ok(result.pendingQuestions.length);assert.ok(result.blockers.some(b=>b.code==='missing_answer'));assert.equal(result.cleanup.confirmed,false);assert.equal(result.cleanup.blocker.code,'cleanup_failed');assert.equal(fixture.state.submissions.length,0);
+});
+test('browser: failed progress persistence prohibits entry or submission',async t=>{
+ const {adapter,fixture,options}=await setup(t);const result=await adapter.apply(job,{...options,onProgress:async()=>{throw new Error('private-test-secret');}});assert.equal(result.blockers[0].code,'storage');assert.equal(fixture.state.advances.length,0);assert.equal(fixture.state.submissions.length,0);assert.equal(JSON.stringify(result.diagnostic).includes('private-test-secret'),false);
+});
+test('browser: inspection login interruption carries a typed global blocker',async t=>{
+ const {adapter}=await setup(t,'signed-out');await assert.rejects(adapter.inspect({...job}),error=>error.blocker?.code==='login_required');
+});
+
+test('browser: missing explicit answers do not become duplicate native-validation blockers',async t=>{const {adapter,options}=await setup(t);const result=await adapter.apply(job,{...options,answers:{}});assert.equal(result.status,'needs_answer');assert.ok(result.pendingQuestions.length);assert.ok(result.blockers.every(b=>b.code==='missing_answer'));});

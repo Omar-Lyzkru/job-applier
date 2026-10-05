@@ -1,8 +1,22 @@
 import {createBrowserSession} from './session.mjs';
-import {fillApplicationFields,validationErrors,checkStopped} from './forms.mjs';
+import {fillApplicationFields,verifyApplicationFields,fieldIdentity,validationErrors,checkStopped} from './forms.mjs';
+import {createHash} from 'node:crypto';
+import {ApplicationFailure,makeBlocker,blockerPolicy} from '../application-lifecycle.mjs';
+import {buildDiagnostic} from '../failure-snapshots.mjs';
 import {buildSearchQueries} from '../search-profiles.mjs';
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+function pauseFailure(reason,phase='form'){
+ const code=/application or speed limit/i.test(reason)?'platform_limit':/sign in/i.test(reason)?'login_required':/verification|safety|warning/i.test(reason)?'verification_challenge':'form_changed';
+ return new ApplicationFailure(code,reason,{phase});
+}
+function navigationFailure(error,phase='inspection'){
+ if(error.blocker)return error;
+ const text=String(error.message||error);
+ const code=/Target.*closed|Browser.*closed|page.*closed/i.test(text)?'browser_unavailable':/net::ERR_(?:CONNECTION_RESET|CONNECTION_CLOSED|TIMED_OUT|NETWORK_CHANGED|INTERNET_DISCONNECTED|NAME_NOT_RESOLVED)|page.goto: Timeout/i.test(text)?'network':'navigation';
+ return new ApplicationFailure(code,text.split('\n')[0],{phase});
+}
 const experienceLabels={INTERNSHIP:'Internship',ENTRY_LEVEL:'Entry level',ASSOCIATE:'Associate',MID_SENIOR_LEVEL:'Mid-Senior level',DIRECTOR:'Director',EXECUTIVE:'Executive'};
 export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=null,timeouts={}}) {
   const baseUrl=fixtureBaseUrl||'https://www.linkedin.com';
@@ -21,16 +35,16 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
     return null;
   }
   async function navigateJob(job){
-    if(!/^\d+$/.test(String(job.id)))throw new Error('Invalid LinkedIn job ID');
+    if(!/^\d+$/.test(String(job.id)))throw new ApplicationFailure('navigation','Invalid LinkedIn job ID',{phase:'inspection'});
     const page=await session.open();
-    await page.goto(`${baseUrl}/jobs/view/${job.id}/`,{waitUntil:'domcontentloaded'});
+    try{await page.goto(`${baseUrl}/jobs/view/${job.id}/`,{waitUntil:'domcontentloaded'});}catch(error){throw navigationFailure(error);}
     return page;
   }
   async function jobContent(page,signal){
     const end=Date.now()+action;
     while(true){
       checkStopped(signal);
-      const pause=await interruption(page);if(pause)throw new Error(pause);
+      const pause=await interruption(page);if(pause)throw pauseFailure(pause,'inspection');
       const content=await page.evaluate(()=>{
         const visible=element=>element.getClientRects().length>0 && !['hidden','collapse'].includes(getComputedStyle(element).visibility);
         const text=element=>visible(element)?element.innerText.trim():'';
@@ -75,7 +89,7 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
       if(Date.now()>=end)break;
       await sleep(Math.min(100,end-Date.now()));
     }
-    throw new Error('Could not read this job\'s description. LinkedIn\'s job layout may have changed or the description did not load. Open the job in the browser and try again.');
+    throw new ApplicationFailure('navigation','Could not read this job\'s description. LinkedIn\'s job layout may have changed or the description did not load. Open the job in the browser and try again.');
   }
   async function experienceFilterValues(page,levels,signal,{confirm=false}={}){
     const unavailable=()=>new Error(confirm?'LinkedIn did not confirm the selected experience levels. Check its filters, or clear Experience level in Settings before retrying.':'LinkedIn\'s experience-level filter is unavailable or changed. Open LinkedIn to check it, or clear Experience level in Settings before retrying.');
@@ -137,8 +151,21 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
     return !await dialogs.count()&&!await page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'Save this application?',exact:true})}).first().isVisible().catch(()=>false);
   }
   async function finish(page,result){
-    if(!await closeDraft(page))return {...result,status:'paused',reason:'Could not close the previous application dialog safely. Stop and close it in LinkedIn before starting again.'};
-    return result;
+    if(result.blockers?.some(b=>b.code==='verification_challenge'))return {...result,cleanup:{confirmed:false,requiredManual:true}};
+    const confirmed=page&&!page.isClosed()?await closeDraft(page):true;
+    const cleanup=confirmed?{confirmed:true}:{confirmed:false,blocker:makeBlocker('cleanup_failed',{phase:'cleanup'})};
+    return {...result,...(!confirmed?{status:'paused'}:{}),cleanup,...(!confirmed?{blockers:[...(result.blockers||[]),cleanup.blocker]}:{})};
+  }
+  async function stepIdentity(dialog){
+    const structure=await dialog.evaluate(root=>{
+      window.__applierSteps ||= {nodes:new WeakMap(),next:1};const state=window.__applierSteps;
+      const token=node=>{if(!state.nodes.has(node))state.nodes.set(node,state.next++);return state.nodes.get(node);};
+      const visible=el=>Boolean(el.getClientRects().length)&&getComputedStyle(el).visibility!=='hidden';
+      const headings=Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]')).filter(visible);
+      const controls=Array.from(root.querySelectorAll('input,select,textarea,[role=combobox],[role=checkbox],[role=radiogroup],[role=listbox],[role=textbox],[contenteditable=true]')).filter(el=>visible(el)&&el.type!=='hidden');
+      const actions=Array.from(root.querySelectorAll('button,[role=button]')).filter(el=>visible(el)&&/^(Next|Review|Continue)(?:\s|$)|^Submit application$/i.test(el.getAttribute('aria-label')||el.innerText));
+      return {headings:headings.map(el=>el.innerText.trim()),schema:controls.map(el=>[el.tagName,el.type,el.name,el.getAttribute('aria-label'),el.required]),actions:actions.map(el=>(el.getAttribute('aria-label')||el.innerText).trim()),generation:[root,...headings,...controls,...actions].map(token)};
+    });return digest(structure);
   }
   async function applicationReady(page,signal){
     let end=Date.now()+action,continued=false,sawReminder=false,previous='';
@@ -262,7 +289,7 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
           if(workplaces[search.workplace])url.searchParams.set('f_WT',workplaces[search.workplace]);
           if(experienceValues)url.searchParams.set('f_E',experienceValues);
           await page.goto(url.href,{waitUntil:'domcontentloaded'});
-          const pause=await interruption(page);if(pause)throw new Error(pause);
+          const pause=await interruption(page);if(pause)throw pauseFailure(pause,'inspection');
           if(search.experienceLevels?.length && !experienceValues){
             experienceValues=await experienceFilterValues(page,search.experienceLevels,signal);
             checkStopped(signal);
@@ -294,78 +321,94 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
     },
     async inspect(job,{signal}={}){
       checkStopped(signal);
-      const page=await navigateJob(job);
-      const {description,title,company}=await jobContent(page,signal);
-      job.title=title||job.title;job.company=company||job.company;
-      return {description,...await postingMetadata(page),alreadyApplied:await page.getByText(/^(Application submitted|Applied)$/i).first().isVisible().catch(()=>false),easyApply:await page.getByRole('button',{name:/Easy Apply/i}).first().isVisible().catch(()=>false)};
-    },
-    async apply(job,{profile,answers,resumePath,dryRun=false,signal,beforeSubmit}){
-      let page,submitted=false;
-      const applicationState={};
-      const withMatches=result=>({...result,...(applicationState.answerMatches?.length?{answerMatches:applicationState.answerMatches}: {})});
-      const complete=result=>finish(page,withMatches(result));
       try{
-        checkStopped(signal);
-        page=await navigateJob(job);
-        const pause=await interruption(page);if(pause)return {status:'paused',reason:pause};
-        if(await page.getByText(/^(Application submitted|Applied)$/i).first().isVisible().catch(()=>false))return {status:'skipped',reason:'LinkedIn shows this job as already applied'};
+        const page=await navigateJob(job),pause=await interruption(page);if(pause)throw pauseFailure(pause,'inspection');
+        if(await page.getByText(/^(This job is no longer available|This job has expired)[.!]?$/i).first().isVisible().catch(()=>false))throw new ApplicationFailure('job_expired',null,{phase:'inspection'});
+        const {description,title,company}=await jobContent(page,signal);job.title=title||job.title;job.company=company||job.company;
+        return {description,...await postingMetadata(page),alreadyApplied:await page.getByText(/^(Application submitted|Applied)$/i).first().isVisible().catch(()=>false),easyApply:await page.getByRole('button',{name:/Easy Apply/i}).first().isVisible().catch(()=>false)};
+      }catch(error){checkStopped(signal);throw navigationFailure(error);}
+    },
+    async apply(job,{profile,answers,resumePath,dryRun=false,signal,beforeSubmit,onProgress,retryCounters:initialCounters}){
+      let page,protectedAttempt=false,pageIndex=0,phase='form',lastStructure={};
+      const applicationState={},retryCounters=structuredClone(initialCounters||{inspectionNavigation:0,applicationNavigation:0,fields:{},pages:{}});
+      const options={profile,answers,resumePath,signal,company:job.company,applicationState,uploadTimeout:action,actionTimeout:action};
+      const progress=async nextPhase=>{phase=nextPhase;try{await onProgress?.({phase,pageIndex,retryCounters:structuredClone(retryCounters)});}catch{throw new ApplicationFailure('storage',null,{phase});}checkStopped(signal);};
+      options.onAction=async ({controlFingerprint,retry})=>{if(retry){const key=`${pageIndex}:${controlFingerprint}`;if((retryCounters.fields[key]||0)>=1)throw new ApplicationFailure('entry_verification',null,{phase:'form',controlFingerprint});retryCounters.fields[key]=1;await progress('form');}};
+      const complete=async result=>{
+        if(page&&!page.isClosed()&&await dialogFor(page).count())try{lastStructure=(await verifyApplicationFields(dialogFor(page),{...options,signal:undefined})).safeStructure;}catch{}
+        if(result.status==='needs_answer'&&result.pendingQuestions?.every(q=>q.blocker==='missing_answer')&&lastStructure.validationCategories?.every(c=>c==='valueMissing'))result={...result,blockers:result.blockers?.filter(b=>b.code!=='validation')};
+        let final=await finish(page,{...result,...(applicationState.answerMatches?.length?{answerMatches:applicationState.answerMatches}:{})});
+        if(final.blockers?.length)final.diagnostic=buildDiagnostic({...lastStructure,phase,pageIndex,timestamp:new Date().toISOString(),code:final.blockers[0].code,transition:final.transition||'unchanged',cleanup:final.cleanup.requiredManual?'not_needed':final.cleanup.confirmed?'closed':'failed'});
+        return final;
+      };
+      const failed=(code,reason,extra={})=>complete({status:protectedAttempt?'unconfirmed':blockerPolicy(code).scope==='global'?'paused':'failed',reason:reason||makeBlocker(code).summary,blockers:[makeBlocker(code,{phase}),...extra.blockers||[]],...extra});
+      const validateReady=async()=>{
+        checkStopped(signal);const pause=await interruption(page);if(pause)throw pauseFailure(pause,phase);
+        const dialog=dialogFor(page);if(!await dialog.count())throw new ApplicationFailure('form_changed',null,{phase});
+        const fresh=await verifyApplicationFields(dialog,options);lastStructure=fresh.safeStructure;
+        if(!fresh.ok){const blocker=fresh.blockers[0]||makeBlocker('form_changed',{phase});const error=new ApplicationFailure(blocker.code,fresh.errors.join('; ')||blocker.summary,{phase});error.questions=fresh.questions;error.blockers=fresh.blockers;throw error;}
+        const submit=dialog.getByRole('button',{name:/^Submit application$/i});if(await submit.count()!==1||!await submit.isEnabled())throw new ApplicationFailure('form_changed','Submit is not uniquely available',{phase});
+      };
+      try{
+        checkStopped(signal);await progress('form');page=await navigateJob(job);
+        const pause=await interruption(page);if(pause)throw pauseFailure(pause);
+        if(await page.getByText(/^(Application submitted|Applied)$/i).first().isVisible().catch(()=>false))return complete({status:'skipped',reason:'LinkedIn shows this job as already applied',blockers:[makeBlocker('already_applied',{phase})]});
         const easy=page.getByRole('button',{name:/Easy Apply/i}).first();
-        if(!await easy.isVisible())return {status:'skipped',reason:'This job does not offer LinkedIn Easy Apply'};
-        await easy.click();
-        const openingEnd=Date.now()+action,retryAt=Date.now()+Math.min(1000,action/2);let retried=false;
+        if(!await easy.isVisible())return complete({status:'skipped',reason:'This job does not offer LinkedIn Easy Apply',blockers:[makeBlocker('external_redirect',{phase})]});
+        await easy.click();const openingEnd=Date.now()+action,retryAt=Date.now()+Math.min(1000,action/2);let retried=false;
         while(!await dialogFor(page).isVisible().catch(()=>false)){
-          checkStopped(signal);
-          const blocked=await interruption(page);if(blocked)return {status:'paused',reason:blocked};
-          if(Date.now()>=openingEnd)throw new Error('LinkedIn did not open its application form. Open the job in the browser and try again.');
-          // Opening a form is safe to retry once when its first click preceded hydration.
-          if(!retried&&Date.now()>=retryAt&&await easy.isVisible().catch(()=>false)){
-            checkStopped(signal);retried=true;await easy.click();
-          }
-          await sleep(100);
+          checkStopped(signal);const blocked=await interruption(page);if(blocked)throw pauseFailure(blocked);
+          if(Date.now()>=openingEnd)throw new ApplicationFailure('form_changed','LinkedIn did not open its application form. Open the job in the browser and try again.',{phase});
+          if(!retried&&Date.now()>=retryAt&&await easy.isVisible().catch(()=>false)){checkStopped(signal);retried=true;retryCounters.pages.open=1;await progress('form');await easy.click();}await sleep(50);
         }
-        const notReady=await applicationReady(page,signal);
-        if(notReady)return {status:'paused',reason:notReady};
-        for(let step=0;step<15;step++){
-          checkStopped(signal);
-          const blocked=await interruption(page);if(blocked)return complete({status:'paused',reason:blocked});
-          const dialog=dialogFor(page);
-          if(!await dialog.count())return complete({status:'failed',reason:'Unsupported application dialog layout'});
-          const filled=await fillApplicationFields(dialog,{profile,answers,resumePath,signal,company:job.company,applicationState,uploadTimeout:action});
-          if(filled.errors.length)return complete({status:'failed',reason:filled.errors.join('; ')});
-          if(filled.questions.length)return complete({status:'needs_answer',reason:'Required or prefilled questions need explicit answers',pendingQuestions:filled.questions.map(question=>({...question,jobId:job.id}))});
-          const errors=await validationErrors(dialog,applicationState);
-          if(errors.length)return complete({status:'failed',reason:`Form validation: ${errors.join('; ')}`});
-          const submit=dialog.getByRole('button',{name:/^Submit application$/i}).first();
+        let notReady=await applicationReady(page,signal);if(notReady)throw pauseFailure(notReady);
+        for(pageIndex=0;pageIndex<15;pageIndex++){
+          checkStopped(signal);await progress('form');const blocked=await interruption(page);if(blocked)throw pauseFailure(blocked);
+          const dialog=dialogFor(page);if(!await dialog.count())throw new ApplicationFailure('form_changed','Unsupported application dialog layout',{phase});
+          const filled=await fillApplicationFields(dialog,options);
+          if(filled.errors.length||filled.questions.length||filled.blockers?.length){
+            const blockers=filled.blockers||[makeBlocker(filled.questions.length?'missing_answer':'validation',{phase})];
+            return complete({status:filled.questions.length?'needs_answer':'failed',reason:filled.errors.join('; ')||'Required or prefilled questions need explicit answers',blockers,pendingQuestions:filled.questions.map(q=>({...q,jobId:job.id}))});
+          }
+          const fresh=await verifyApplicationFields(dialog,options);lastStructure=fresh.safeStructure;
+          if(!fresh.ok)return failed(fresh.blockers[0]?.code||'form_changed',fresh.errors.join('; '),{blockers:fresh.blockers,pendingQuestions:fresh.questions.map(q=>({...q,jobId:job.id}))});
+          const submit=dialog.getByRole('button',{name:/^Submit application$/i});
           if(await submit.isVisible().catch(()=>false)){
+            await progress('review');await validateReady();
             if(dryRun)return complete({status:'ready',reason:'Review reached. Dry run did not submit.'});
-            checkStopped(signal);
-            if(typeof beforeSubmit!=='function')throw new Error('Submission guard is missing');
-            await beforeSubmit();checkStopped(signal);
-            submitted=true;await submit.click();
+            if(typeof beforeSubmit!=='function')throw new ApplicationFailure('storage','Submission guard is missing',{phase});
+            await beforeSubmit({validateReady});protectedAttempt=true;checkStopped(signal);await validateReady();
+            await dialogFor(page).getByRole('button',{name:/^Submit application$/i}).click();await progress('confirmation');
             const end=Date.now()+confirmation;
             while(Date.now()<end){
-              const success=page.getByText(/^(Application sent|Application submitted|Your application (?:was|has been) sent(?: to .*)?\.?|Your application has been submitted\.?)$/i).first();
+              checkStopped(signal);const success=page.getByText(/^(Application sent|Application submitted|Your application (?:was|has been) sent(?: to .*)?\.?|Your application has been submitted\.?)$/i).first();
               if(await success.isVisible().catch(()=>false))return complete({status:'submitted',reason:'LinkedIn confirmed the application',evidence:await success.innerText()});
-              const interruptionReason=await interruption(page);
-              if(interruptionReason)return complete({status:'unconfirmed',reason:`Submit was clicked, but confirmation was interrupted: ${interruptionReason}`});
-              await sleep(100);
-            }
-            return complete({status:'unconfirmed',reason:'Submit was clicked, but no explicit confirmation was observed. Check LinkedIn before applying again.'});
+              const interruptionReason=await interruption(page);if(interruptionReason)return failed('submission_uncertain',`Submit was clicked, but confirmation was interrupted: ${interruptionReason}`);await sleep(50);
+            }return failed('submission_uncertain','Submit was clicked, but no explicit confirmation was observed. Check LinkedIn before applying again.');
           }
-          const next=dialog.getByRole('button',{name:/^(Next|Review|Continue)(?:\s|$)/i}).first();
-          if(!await next.isVisible().catch(()=>false))return complete({status:'failed',reason:'Unsupported application step: no Next, Review, or Submit action'});
-          const previous=await dialog.innerText();
-          await next.click();
-          await dialog.waitFor({state:'visible',timeout:action});
-          const end=Date.now()+action;
-          while(Date.now()<end && await dialog.innerText()===previous)await sleep(100);
-          if(await dialog.innerText()===previous)return complete({status:'failed',reason:'The application did not advance. Check its validation messages in LinkedIn.'});
-          const notReady=await applicationReady(page,signal);if(notReady)return withMatches({status:'paused',reason:notReady});
-        }
-        return complete({status:'failed',reason:'Application exceeded the supported 15-step limit'});
+          const previous=await stepIdentity(dialog);let advanced=false;
+          for(let retry=0;retry<2&&!advanced;retry++){
+            checkStopped(signal);const next=dialogFor(page).getByRole('button',{name:/^(Next|Review|Continue)(?:\s|$)/i});
+            if(await next.count()!==1||!await next.isEnabled())throw new ApplicationFailure('form_changed','Unsupported application step: no unique enabled Next, Review, or Submit action',{phase});
+            if(retry){retryCounters.pages[pageIndex]=1;await progress('form');}
+            await next.click();const end=Date.now()+action;let candidate=null;
+            while(Date.now()<end){
+              checkStopped(signal);const interruptionReason=await interruption(page);if(interruptionReason)throw pauseFailure(interruptionReason);
+              if(!await dialogFor(page).count())throw new ApplicationFailure('form_changed','Application dialog disappeared',{phase});
+              const current=await stepIdentity(dialogFor(page));const verify=await verifyApplicationFields(dialogFor(page),options);lastStructure=verify.safeStructure;
+              if(await stepIdentity(dialogFor(page))!==current){await sleep(50);continue;}
+              if(verify.safeStructure.validationCategories.includes('employer_feedback'))return failed('validation',verify.errors.join('; '));
+              if(current!==previous&&!verify.safeStructure.busy){if(candidate===current){advanced=true;break;}candidate=current;}
+              else{candidate=null;if(current===previous&&!verify.safeStructure.busy&&verify.errors.length)return failed('validation',verify.errors.join('; '));}
+              await sleep(50);
+            }
+            if(!advanced){const verified=await verifyApplicationFields(dialogFor(page),options);if(!verified.ok||await stepIdentity(dialogFor(page))!==previous||retry)throw new ApplicationFailure('form_changed','The application did not advance. Check its validation messages in LinkedIn.',{phase});}
+          }
+          notReady=await applicationReady(page,signal);if(notReady)throw pauseFailure(notReady);
+        }throw new ApplicationFailure('form_changed','Application exceeded the supported 15-step limit',{phase});
       }catch(error){
-        const result={status:submitted?'unconfirmed':'failed',reason:error.message.split('\n')[0]};
-        return page&&!page.isClosed()?complete(result):withMatches(result);
+        const blocker=protectedAttempt?makeBlocker('submission_uncertain',{phase}):error.blocker||makeBlocker(/Stopped/.test(error.message)?'navigation':'unknown',{phase});
+        return complete({status:protectedAttempt?'unconfirmed':blockerPolicy(blocker.code).scope==='global'?'paused':'failed',reason:error.message.split('\n')[0],blockers:protectedAttempt?[blocker,...(error.blockers||(error.blocker?[error.blocker]:[]))]:error.blockers||[blocker],...(error.questions?.length?{pendingQuestions:error.questions.map(q=>({...q,jobId:job.id}))}:{})});
       }
     },
     close:()=>session.close()

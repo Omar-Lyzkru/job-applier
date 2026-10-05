@@ -1,14 +1,15 @@
+import {ApplicationFailure} from '../application-lifecycle.mjs';
 import {mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 
 export function browserLaunchError(error) {
   const message=String(error?.message||error).replace(/\u001b\[[0-?]*[ -/]*[@-~]/g,'');
   if(/Opening in existing browser session|user data directory is already in use|SingletonLock.*(?:File exists|already exists)/i.test(message)){
-    return new Error('The Job Applier browser profile is already open in another Chromium window. Close that app browser, then choose Open LinkedIn again.');
+    return new ApplicationFailure('browser_unavailable','The Job Applier browser profile is already open in another Chromium window. Close that app browser, then choose Open LinkedIn again.');
   }
-  if(/Executable doesn't exist/i.test(message))return new Error('Chromium is not installed. Run ./setup.sh or npm run browser:install.');
+  if(/Executable doesn't exist/i.test(message))return new ApplicationFailure('browser_unavailable','Chromium is not installed. Run ./setup.sh or npm run browser:install.');
   const reason=message.split(/\r?\n/).find(line=>line.trim())?.trim().replace(/^browserType\.launchPersistentContext:\s*/,'')||'Browser launch failed';
-  return new Error(`Could not open Chromium: ${reason}`);
+  return new ApplicationFailure('browser_unavailable',`Could not open Chromium: ${reason}`);
 }
 
 export function createBrowserSession({dataDir,headless=false,baseUrl='https://www.linkedin.com',actionTimeout=10000}) {

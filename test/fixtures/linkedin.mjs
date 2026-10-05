@@ -1,13 +1,15 @@
 import {createServer} from 'node:http';
 
 export async function startFixture(scenario='success') {
-  const state={events:[],submissions:[],reviews:[],searches:[],views:[],fields:null};
+  const state={events:[],advances:[],entries:[],submissions:[],reviews:[],searches:[],views:[],fields:null};
   const escapeHtml=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
   const server=createServer(async(req,res)=> {
     const url=new URL(req.url,'http://localhost');
     if (url.pathname==='/events') {
       const chunks=[]; for await (const chunk of req) chunks.push(chunk);
       const event=JSON.parse(Buffer.concat(chunks).toString());
+      if(event.kind==='entry')state.entries.push(event);
+      if(event.kind==='advance'){state.advances.push(event);if(state.beforeAdvance)await state.beforeAdvance(event,req,res);}
       if (event.kind==='submit') {state.events.push('submit'); state.submissions.push(event.fields); state.fields=event.fields;}
       if(event.kind==='review'){state.reviews.push(event.fields);state.fields=event.fields;}
       if(event.kind==='reminder-continue'||event.kind==='reminder-review')state.events.push(event.kind);
@@ -63,6 +65,7 @@ export async function startFixture(scenario='success') {
       if(scenario==='description-delayed')setTimeout(()=>{document.querySelector('#job-details').textContent='Hydrated Python software description.';},250);
       if(scenario==='description-modern-delayed')setTimeout(()=>{document.querySelector('.cky-description-section p span').textContent='Hydrated Python internship description.';},250);
       if(scenario==='description-verification')setTimeout(()=>{document.body.insertAdjacentHTML('afterbegin','<p>Complete this security check</p>');},250);
+      document.addEventListener('input',()=>fetch('/events',{method:'POST',body:JSON.stringify({kind:'entry'})}));
       let values={};
       let documents={'old-document':{name:'selected-resume.pdf',content:'old resume content'}};
       const escape=s=>String(s).replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;');
@@ -76,7 +79,7 @@ export async function startFixture(scenario='success') {
         const documentChoice=document.querySelector('.jobs-document-upload input[type=radio]:checked');
         if(documentChoice){values.documentId=documentChoice.value;values.resume=documents[documentChoice.value].name;values.resumeContent=documents[documentChoice.value].content;}
       }
-      let dismissClicks=0;
+      let dismissClicks=0;const ignoredSteps=new Set();
       function dismiss(){
         if(scenario==='dismiss-delayed'&&dismissClicks++===0)return;
         if(scenario==='modern-discard'||scenario==='dismiss-delayed'){
@@ -97,7 +100,7 @@ export async function startFixture(scenario='success') {
         if(scenario==='limit'){dialog.innerHTML=close+'<p>You have reached the daily application limit. Please try again tomorrow.</p>';}
         else if(n===1)dialog.innerHTML=close+'<h2>Contact information</h2><label>First name<input name="first" required></label><label>Last name<input name="last" required></label><label>Email address<input name="email" type="email" required></label><label>Phone number<input name="phone" type="tel" required></label><label>Resume<input name="resume" type="file" accept=".pdf,.doc,.docx" required></label><label>Previous employer<textarea name="previous">Unknown company</textarea></label><button id="advance">Next</button>';
         else if(n===2 && scenario==='answer-memory')dialog.innerHTML=close+'<h2>Additional questions</h2><label>University name*<input name="school" required></label><label>Are you authorized to work legally in the US?*<select name="authorized" required><option value="">Choose</option><option value="1">Yes</option><option value="0">No</option></select></label><fieldset><legend>Will you now or anytime after graduation require sponsorship for a work visa (like an H1b) to work legally in the US?*</legend><label><input name="sponsorship" type="radio" value="1" required>Yes</label><label><input name="sponsorship" type="radio" value="0" required>No</label></fieldset><label>Do you consent to text message updates about your application?*<select name="sms" required><option value="">Choose</option><option value="1">Yes</option><option value="0">No</option></select></label><button id="advance">Review</button>';
-        else if(n===2)dialog.innerHTML=close+'<h2>Screening questions</h2><label>Years of Java experience<input name="years" type="number" required></label><label>Are you authorized to work in this country?<select name="authorized" required><option value="">Select an option</option><option value="1">Yes</option><option value="0">No</option></select></label><fieldset><legend>Are you willing to relocate?</legend><label><input type="radio" name="relocate" value="yes" required>Yes</label><label><input type="radio" name="relocate" value="no" required>No</label></fieldset><label><input name="consent" type="checkbox" required>I agree to share this information</label><label><input name="follow" type="checkbox" checked>Follow company</label><button id="advance">Review</button>';
+        else if(n===2||n===3&&scenario==='identical-text-next')dialog.innerHTML=close+'<h2>Screening questions</h2><label>Years of Java experience<input name="years" type="number" required></label><label>Are you authorized to work in this country?<select name="authorized" required><option value="">Select an option</option><option value="1">Yes</option><option value="0">No</option></select></label><fieldset><legend>Are you willing to relocate?</legend><label><input type="radio" name="relocate" value="yes" required>Yes</label><label><input type="radio" name="relocate" value="no" required>No</label></fieldset><label><input name="consent" type="checkbox" required>I agree to share this information</label><label><input name="follow" type="checkbox" checked>Follow company</label><button id="advance">Review</button>';
         else dialog.innerHTML=close+'<h2>Review your application</h2><pre>'+escape(JSON.stringify(values))+'</pre><button id="submit">Submit application</button>';
         if(['page-progress','page-progress-busy','upload-progress','indeterminate-progress','unrelated-page-counter'].includes(scenario)){
           const counter=scenario==='upload-progress'||scenario==='unrelated-page-counter'?'Uploading résumé':' '+n+'/5 pages';
@@ -134,7 +137,12 @@ export async function startFixture(scenario='success') {
         if(n===2 && scenario==='custom-listbox')dialog.querySelector('#advance').insertAdjacentHTML('beforebegin','<div role="listbox" aria-label="Citizenship" tabindex="0"><div role="option" aria-selected="true">Citizen<input type="text" value="citizen" style="display:none"></div></div>');
         if(n===2 && scenario==='custom-combobox')dialog.querySelector('#advance').insertAdjacentHTML('beforebegin','<div role="combobox" aria-label="Citizenship" tabindex="0" aria-expanded="false">Citizen<input type="hidden" value="citizen"></div>');
         dialog.querySelector('#dismiss').onclick=dismiss;
-        dialog.querySelector('#advance')?.addEventListener('click',async()=>{collect();if(scenario==='answer-memory'&&n===2)await fetch('/events',{method:'POST',body:JSON.stringify({kind:'review',fields:values})});step(n+1);});
+        dialog.querySelector('#advance')?.addEventListener('click',async()=>{collect();await fetch('/events',{method:'POST',body:JSON.stringify({kind:'advance',step:n})});
+          if(n===2&&scenario==='ignored-next-always')return;
+          if(n===2&&scenario==='ignored-next-once'&&!ignoredSteps.has(n)){ignoredSteps.add(n);return;}
+          if(n===2&&scenario==='next-validation'){dialog.insertAdjacentHTML('beforeend','<p role="alert">Validation private-test-secret</p>');return;}
+          if(n===2&&scenario==='next-busy'){dialog.setAttribute('aria-busy','true');dialog.insertAdjacentHTML('beforeend','<p role="status">Loading</p>');return;}
+          if(scenario==='answer-memory' &&n===2)await fetch('/events',{method:'POST',body:JSON.stringify({kind:'review',fields:values})});step(n+1);});
         dialog.querySelector('#submit')?.addEventListener('click',async(event)=>{
           event.target.disabled=true;
           await fetch('/events',{method:'POST',body:JSON.stringify({kind:'submit',fields:values})});

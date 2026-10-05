@@ -19,3 +19,5 @@ test('other browser launch errors keep installation help or a concise reason',()
   assert.match(browserLaunchError(new Error("Executable doesn't exist at /private/chrome")).message,/npm run browser:install/);
   assert.equal(browserLaunchError(new Error('browserType.launchPersistentContext: Browser crashed\nCall log:\n\u001b[2m<launching> private flags\u001b[22m')).message,'Could not open Chromium: Browser crashed');
 });
+
+test('browser launch failures carry a typed browser blocker',()=>{assert.equal(browserLaunchError(new Error('Opening in existing browser session')).blocker.code,'browser_unavailable');});
