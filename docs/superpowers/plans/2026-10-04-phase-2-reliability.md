@@ -111,7 +111,7 @@ assert.equal(projectQuestions(differentPostingHistory,questions).length,question
 - Add `store.reserveSubmission(id,{expectedRevision,now,timezone,dailyCap}) -> Record`. In one queued history mutation validate current unattempted state, ID/fingerprint history and cap, then set status/phase/attemptedAt. Exclude only the current unattempted record from its own duplicate check.
 - Add `store.reconcileQuestions() -> Question[]` using Task 1 projection, and `store.recoverWork() -> void`. Recovery handles old reservations and new unattempted in-flight work, then reconciles questions. Keep `recoverPending()` compatible for older callers until runner/server are moved to recoverWork.
 
-- [ ] **Step 1: Add failing real-store tests using temporary data directories.** Cover valid linked transitions, stale/conflicting parent claims, immutable identities/attempts, load of old seven-state history, one atomic reservation, concurrent same-ID/strong-equivalent reservations, daily cap under concurrent mutations, and write failures before/after reservation. Close/reopen at queued/inspecting/filling/submission_pending; assert only the latter has attemptedAt and recovers unconfirmed. Simulate a crash between canonical outcome and question projection by writing the canonical record, closing before reconcile, then reopening/recovering. Verify config/answers bytes unchanged; operational/orphan legacy questions preserved; exact-job ready/submitted clears superseded questions.
+- [x] **Step 1: Add failing real-store tests using temporary data directories.** Cover valid linked transitions, stale/conflicting parent claims, immutable identities/attempts, load of old seven-state history, one atomic reservation, concurrent same-ID/strong-equivalent reservations, daily cap under concurrent mutations, and write failures before/after reservation. Close/reopen at queued/inspecting/filling/submission_pending; assert only the latter has attemptedAt and recovers unconfirmed. Simulate a crash between canonical outcome and question projection by writing the canonical record, closing before reconcile, then reopening/recovering. Verify config/answers bytes unchanged; operational/orphan legacy questions preserved; exact-job ready/submitted clears superseded questions.
 
 ```js
 assert.equal((await store.getHistory()).filter(r=>r.attemptedAt).length,1);
@@ -121,10 +121,10 @@ assert.equal((await recovered.getHistory())[0].attemptedAt,null);
 assert.equal((await recovered.getQuestions())[0].label,'Relocate?');
 ```
 
-- [ ] **Step 2: Run `node --test --test-isolation=none test/store.test.mjs test/application-lifecycle.test.mjs`.** Expected: new durable-work/reservation/reconcile tests fail against the current store; investigate each expected failure.
-- [ ] **Step 3: Implement the declared store contracts within existing serialized atomic writes and ownership.** Validate version-1 fields while accepting legacy records. Persist questions with blockers/status in history; reconcile compatibility questions afterwards. Skip unnecessary writes on a no-change projection/recovery. A failed canonical write leaves no permission to submit; a durable reservation remains blocking even if a later write fails.
-- [ ] **Step 4: Run the Step 2 command, then `npm test`.** Expected: all tests pass, including restart uncertainty, ownership, corrupt-file errors and serialized history. Root-owned code callers still work through compatibility helpers.
-- [ ] **Step 5: Commit this task.** Message: `feat: persist resumable work and atomic submission claims`. Complete the Native task using Step 2's command.
+- [x] **Step 2: Run `node --test --test-isolation=none test/store.test.mjs test/application-lifecycle.test.mjs`.** Expected: new durable-work/reservation/reconcile tests fail against the current store; investigate each expected failure.
+- [x] **Step 3: Implement the declared store contracts within existing serialized atomic writes and ownership.** Validate version-1 fields while accepting legacy records. Persist questions with blockers/status in history; reconcile compatibility questions afterwards. Skip unnecessary writes on a no-change projection/recovery. A failed canonical write leaves no permission to submit; a durable reservation remains blocking even if a later write fails.
+- [x] **Step 4: Run the Step 2 command, then `npm test`.** Expected: all tests pass, including restart uncertainty, ownership, corrupt-file errors and serialized history. Root-owned code callers still work through compatibility helpers.
+- [x] **Step 5: Commit this task.** Message: `feat: persist resumable work and atomic submission claims`. Complete the Native task using Step 2's command.
 
 ### Task 3: Allowlisted private failure snapshots
 

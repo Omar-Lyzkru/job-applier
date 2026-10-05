@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, rm, writeFile, readFile} from 'node:fs/promises';
+import {mkdtemp, rm, writeFile, readFile, rename, mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createStore} from '../src/store.mjs';
@@ -107,4 +107,98 @@ test('legacy profile links remain editable instead of preventing app startup',as
   await assert.rejects(store.saveConfig(previous),/LinkedIn profile URL/);
   await store.saveConfig({...previous,profile:{...previous.profile,linkedinUrl:'linkedin.com/in/test-applicant',website:''}});
   assert.equal((await store.getConfig()).profile.linkedinUrl,'https://linkedin.com/in/test-applicant');
+});
+
+const clock=new Date('2026-10-04T15:00:00Z');
+const workJob=(id='100',fingerprint)=>({id,url:`https://www.linkedin.com/jobs/view/${id}/`,title:'Engineer',company:'Example',...(fingerprint?{fingerprint}:{})});
+async function workStore(t){const dir=await temporary(t),store=await createStore(dir);t.after(()=>store.close());return {dir,store};}
+async function filling(store,job=workJob()){
+ let r=await store.createWork(job,{now:clock});
+ r=await store.transitionWork(r.id,{expectedRevision:r.revision,status:'inspecting',phase:'inspection',now:clock});
+ return store.transitionWork(r.id,{expectedRevision:r.revision,status:'filling',phase:'form',now:clock});
+}
+const reserve=(store,r,cap=10)=>store.reserveSubmission(r.id,{expectedRevision:r.revision,now:clock,timezone:'America/Chicago',dailyCap:cap});
+
+test('durable lifecycle enforces revision, identities and legal transitions',async t=>{
+ const {store}=await workStore(t),r=await store.createWork(workJob(),{now:clock});
+ assert.equal(r.lifecycleVersion,1);assert.equal(r.lineageId,r.id);assert.equal(r.status,'queued');assert.equal(r.attemptedAt,null);
+ const next=await store.transitionWork(r.id,{expectedRevision:0,status:'inspecting',phase:'inspection',job:{...r.job,description:'fresh'},now:clock});
+ assert.equal(next.revision,1);assert.equal(next.job.description,'fresh');
+ await assert.rejects(store.transitionWork(r.id,{expectedRevision:0,status:'filling'}),/revision|stale/i);
+ await assert.rejects(store.transitionWork(r.id,{expectedRevision:1,status:'submitted'}),/transition/i);
+ await assert.rejects(store.transitionWork(r.id,{expectedRevision:1,job:workJob('999')}),/identity/i);
+ await assert.rejects(store.transitionWork(r.id,{expectedRevision:1,attemptedAt:clock.toISOString()}),/field|immutable/i);
+ await assert.rejects(store.updateRecord(r.id,{status:'submitted'}),/transition|lifecycle/i);
+});
+test('a retry links to its parent atomically and conflicting or stale claims fail',async t=>{
+ const {store}=await workStore(t);let parent=await filling(store);
+ parent=await store.transitionWork(parent.id,{expectedRevision:parent.revision,status:'failed',phase:'form',blockers:[{code:'validation'}]});
+ const results=await Promise.allSettled([1,2].map(()=>store.createWork(parent.job,{parentId:parent.id,expectedParentRevision:parent.revision,now:clock})));
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ const child=results.find(r=>r.status==='fulfilled').value;
+ assert.equal(child.retryOf,parent.id);assert.equal(child.lineageId,parent.lineageId);
+ const saved=(await store.getHistory()).find(r=>r.id===parent.id);assert.equal(saved.retryId,child.id);assert.equal(saved.revision,parent.revision+1);
+ await assert.rejects(store.createWork(parent.job,{parentId:parent.id,expectedParentRevision:parent.revision}),/revision|stale|active|latest/i);
+});
+test('legacy states load without rewriting and unattempted legacy failure can be claimed',async t=>{
+ const dir=await temporary(t),states=['submitted','submission_pending','unconfirmed','skipped','needs_answer','failed','ready'];
+ const records=states.map((status,i)=>({id:`legacy-${i}`,job:workJob(String(i+1)),status,startedAt:clock.toISOString(),attemptedAt:null}));
+ await writeFile(join(dir,'history.json'),JSON.stringify(records));const bytes=await readFile(join(dir,'history.json'),'utf8');
+ const store=await createStore(dir);t.after(()=>store.close());assert.deepEqual(await store.getHistory(),records);
+ assert.equal(await readFile(join(dir,'history.json'),'utf8'),bytes);
+ const child=await store.createWork(records[5].job,{parentId:records[5].id,expectedParentRevision:0});assert.equal(child.retryOf,records[5].id);
+});
+test('reserved submission is immutable and cannot return to unattempted work',async t=>{
+ const {store}=await workStore(t),r=await reserve(store,await filling(store));
+ assert.equal(r.status,'submission_pending');assert.equal(r.attemptedAt,clock.toISOString());assert.equal(r.phase,'submission');
+ await assert.rejects(reserve(store,r),/attempt|reserve|state/i);
+ await assert.rejects(store.transitionWork(r.id,{expectedRevision:r.revision,status:'queued'}),/transition/i);
+ await assert.rejects(store.transitionWork(r.id,{expectedRevision:r.revision,attemptedAt:null}),/immutable|field/i);
+ const done=await store.transitionWork(r.id,{expectedRevision:r.revision,status:'submitted',phase:'confirmation'});
+ assert.equal(done.attemptedAt,r.attemptedAt);assert.ok(done.finishedAt);
+});
+for(const equivalent of [false,true])test(`concurrent reservations protect ${equivalent?'strong equivalent':'same ID'} jobs`,async t=>{
+ const {store}=await workStore(t),a=await filling(store,workJob('100','f'.repeat(64))),b=await filling(store,workJob(equivalent?'101':'100','f'.repeat(64)));
+ const results=await Promise.allSettled([reserve(store,a),reserve(store,b)]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await store.getHistory()).filter(r=>r.attemptedAt).length,1);
+});
+test('daily cap is checked in the atomic reservation under concurrency',async t=>{
+ const {store}=await workStore(t),a=await filling(store,workJob('100')),b=await filling(store,workJob('101'));
+ const results=await Promise.allSettled([reserve(store,a,1),reserve(store,b,1)]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ assert.match(results.find(r=>r.status==='rejected').reason.message,/cap/i);
+});
+for(const phase of ['queued','inspecting','filling','submission_pending'])test(`recovery preserves ${phase} work with correct submission protection`,async t=>{
+ const {dir,store}=await workStore(t);let r=await store.createWork(workJob(),{now:clock});
+ if(phase!=='queued')r=await store.transitionWork(r.id,{expectedRevision:r.revision,status:'inspecting',phase:'inspection'});
+ if(['filling','submission_pending'].includes(phase))r=await store.transitionWork(r.id,{expectedRevision:r.revision,status:'filling',phase:'form',pendingQuestions:[{key:'relocate',label:'Relocate?',type:'radio',options:[{label:'Yes',value:'yes'},{label:'No',value:'no'}],required:true,blocker:'missing_answer'}]});
+ if(phase==='submission_pending')r=await reserve(store,r);
+ await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());await reopened.recoverWork();
+ const [saved]=await reopened.getHistory();assert.equal(saved.status,phase==='submission_pending'?'unconfirmed':'interrupted');assert.equal(Boolean(saved.attemptedAt),phase==='submission_pending');assert.equal(saved.phase,r.phase);
+ if(['filling','submission_pending'].includes(phase))assert.equal((await reopened.getQuestions())[0].label,'Relocate?');
+ const bytes=await readFile(join(dir,'history.json'),'utf8');await reopened.recoverWork();assert.equal(await readFile(join(dir,'history.json'),'utf8'),bytes);
+});
+test('canonical questions recover after a crash without changing settings or answers',async t=>{
+ const {dir,store}=await workStore(t);await store.saveConfig({profile:{email:'synthetic@example.com'}});await store.saveAnswers({Relocate:false});
+ const config=await readFile(join(dir,'config.json'),'utf8'),answers=await readFile(join(dir,'answers.json'),'utf8');
+ await store.saveQuestions([{jobId:'999',label:'Orphan?',key:'orphan',type:'text'},{jobId:'100',label:'Entry issue',key:'entry',type:'text',reason:'Entry failed'}]);
+ let r=await filling(store);r=await store.transitionWork(r.id,{expectedRevision:r.revision,status:'needs_answer',phase:'form',pendingQuestions:[{key:'relocate',label:'Relocate?',type:'radio',options:[{label:'Yes',value:'yes'},{label:'No',value:'no'}],blocker:'missing_answer',required:true}]});
+ await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());await reopened.recoverWork();
+ assert.equal((await reopened.getQuestions()).length,3);assert.ok((await reopened.getQuestions()).some(q=>q.recordId===r.id));
+ assert.equal(await readFile(join(dir,'config.json'),'utf8'),config);assert.equal(await readFile(join(dir,'answers.json'),'utf8'),answers);
+ const child=await reopened.createWork(r.job,{parentId:r.id,expectedParentRevision:r.revision});
+ let current=await reopened.transitionWork(child.id,{expectedRevision:0,status:'inspecting',phase:'inspection'});
+ current=await reopened.transitionWork(child.id,{expectedRevision:current.revision,status:'filling',phase:'form'});
+ await reopened.transitionWork(child.id,{expectedRevision:current.revision,status:'ready',phase:'review'});await reopened.reconcileQuestions();
+ assert.deepEqual((await reopened.getQuestions()).map(q=>q.jobId),['999']);
+});
+for(const after of [false,true])test(`failed write ${after?'after':'before'} reservation preserves durable truth`,async t=>{
+ const {dir,store}=await workStore(t);let r=await filling(store);if(after)r=await reserve(store,r);
+ const path=join(dir,'history.json');await rename(path,path+'.saved');await mkdir(path);
+ try{await assert.rejects(after?store.transitionWork(r.id,{expectedRevision:r.revision,status:'submitted'}):reserve(store,r));assert.equal((await store.getHistory())[0].status,r.status);}
+ finally{await rm(path,{recursive:true});await rename(path+'.saved',path);}
+ await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());await reopened.recoverWork();
+ assert.equal((await reopened.getHistory())[0].status,after?'unconfirmed':'interrupted');assert.equal(Boolean((await reopened.getHistory())[0].attemptedAt),after);
+});
+test('legacy update cannot erase an attempted timestamp',async t=>{
+ const {store}=await workStore(t),r=await store.createRecord(workJob(),'submission_pending');await assert.rejects(store.updateRecord(r.id,{attemptedAt:null}),/attempt|immutable/i);
 });
