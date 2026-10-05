@@ -1,6 +1,6 @@
 # Phase 1 Intelligence Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Rank suitable jobs before applying and reduce repeated questions through compatible grouping and explicit saved-answer reuse.
 
@@ -45,11 +45,11 @@ concurrent edits to shared domain, server, dashboard, or fixture files.
 
 ## Preflight
 
-- [ ] Read the approved specification and both workstream plans. Check repository instructions and current uncommitted changes.
-- [ ] Use superpowers:using-git-worktrees at execution time. Inspect attached artifacts and reuse a suitable worktree; otherwise create one from the current reviewed main commit on codex/phase-1-intelligence. Use the managed tool when supported, with the skill's local fallback if necessary.
-- [ ] Keep production data and the running app in the primary checkout. Reuse installed node_modules and, if needed, link only data/browsers into a new otherwise empty worktree data directory. Do not link the production data directory, config, answers, questions, history, résumés, or browser profile. Use existing browser-runner environment settings; no dependency upgrades are needed.
-- [ ] Run npm test and npm run test:browser once in that isolated checkout. Expected baseline: 91 unit/API tests and 103 browser scenarios with zero failures. Investigate baseline failures before implementation.
-- [ ] Record the baseline and active checkout in this plan; leave public behavior and production data unchanged until integration.
+- [x] Read the approved specification and both workstream plans. Check repository instructions and current uncommitted changes.
+- [x] Use superpowers:using-git-worktrees at execution time. Inspect attached artifacts and reuse a suitable worktree; otherwise create one from the current reviewed main commit on codex/phase-1-intelligence. Use the managed tool when supported, with the skill's local fallback if necessary.
+- [x] Keep production data and the running app in the primary checkout. Reuse installed node_modules and, if needed, link only data/browsers into a new otherwise empty worktree data directory. Do not link the production data directory, config, answers, questions, history, résumés, or browser profile. Use existing browser-runner environment settings; no dependency upgrades are needed.
+- [x] Run npm test and npm run test:browser once in that isolated checkout. Expected baseline: 91 unit/API tests and 103 browser scenarios with zero failures. Investigate baseline failures before implementation.
+- [x] Record the baseline and active checkout in this plan; leave public behavior and production data unchanged until integration.
 
 ## Final task: Verify and deliver Phase 1
 
@@ -57,10 +57,10 @@ concurrent edits to shared domain, server, dashboard, or fixture files.
 
 **Interfaces:** Consume the completed two workstreams. Produce a runnable reviewed Phase 1 update and its verification record, with no later-phase implementation.
 
-- [ ] Run all newly added pure/API/runner regressions and the complete npm test and npm run test:browser suites; read actual output and record exact counts and failures. Run node --check on changed modules and git diff --check.
-- [ ] Review the integrated branch independently for specification coverage, unknown-fact handling, grouped-answer compatibility, private-data exclusion, and unchanged submission guards. Fix findings with failing regressions, then rerun the affected checks and complete suites if behavior changed.
-- [ ] Inspect fixture-based desktop and 390px mobile screenshots for Settings, fit details, grouped pending questions, saved values, retained drafts, and horizontal overflow. Capture proof without private applicant data.
-- [ ] Document how to enable intelligent matching, confirm skills, select families/regions, change minimum score, inspect explanations, and answer grouped cards. Explain that score is a rubric and that legal/consent answers stay explicit.
+- [x] Run all newly added pure/API/runner regressions and the complete npm test and npm run test:browser suites; read actual output and record exact counts and failures. Run node --check on changed modules and git diff --check.
+- [x] Review the integrated branch independently for specification coverage, unknown-fact handling, grouped-answer compatibility, private-data exclusion, and unchanged submission guards. Fix findings with failing regressions, then rerun the affected checks and complete suites if behavior changed.
+- [x] Inspect fixture-based desktop and 390px mobile screenshots for Settings, fit details, grouped pending questions, saved values, retained drafts, and horizontal overflow. Capture proof without private applicant data.
+- [x] Document how to enable intelligent matching, confirm skills, select families/regions, change minimum score, inspect explanations, and answer grouped cards. Explain that score is a rubric and that legal/consent answers stay explicit.
 - [ ] Integrate the verified branch according to existing repository/user authorization. Before restarting production, verify no active run; back up private config/answers/questions/history and compare contents after startup. If active, defer restart rather than interrupt it.
 - [ ] Read the updated local bootstrap and inspect the UI without editing real answers or submitting applications. Preserve stored data; report any live compatibility check that remains unverified.
 - [ ] Push the authorized code update only after checks pass. Verify the remote commit matches the local commit and exclude data, backups, screenshots, cookies, and résumé files.

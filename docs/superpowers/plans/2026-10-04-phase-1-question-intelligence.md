@@ -1,6 +1,6 @@
 # Phase 1 Question Intelligence Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Reuse known explicit answers safely and show compatible repeated questions once without losing job-specific failures or drafts.
 
@@ -95,7 +95,7 @@ number or numeric string; booleans and prose are not inferred into years. For
 offered range/choice answers, existing displayed-choice compatibility still
 controls and cannot be converted into a fabricated scalar.
 
-- [ ] Add table tests for every finite template, same-skill aliases, Java versus JavaScript, zero/decimal values, exact precedence, conflicting equivalent values, total versus professional scope, and all excluded qualifiers. Assert false and No agree for known current-student meaning while no value is preselected.
+- [x] Add table tests for every finite template, same-skill aliases, Java versus JavaScript, zero/decimal values, exact precedence, conflicting equivalent values, total versus professional scope, and all excluded qualifiers. Assert false and No agree for known current-student meaning while no value is preselected.
 
 ```js
 const field={label:'How many years of experience do you have with Python?',type:'number'};
@@ -105,10 +105,10 @@ assert.equal(resolveAnswer({label:'Are you presently a student?',type:'radio',op
 assert.equal(resolveAnswer({label:'Years of C++ experience',type:'number'}, {}, {'years of c experience':2}).kind, 'missing');
 ```
 
-- [ ] Run node --test --test-isolation=none test/domain.test.mjs test/server.test.mjs; verify new regressions fail before matching changes.
-- [ ] Implement finite whole-label meanings and source provenance reuse. Preserve source screening labels as keys; never use matching-profile/resume facts as answers. Extend semantic yes/no comparison only for known student status. Make sensitive suggestion exclusion symmetric on requested and candidate questions, including legal, authorization, sponsorship, consent/SMS, salary/pay, certification, clearance and identity terms. Exact explicitly saved sensitive answers still follow existing guards.
-- [ ] Rerun focused tests. Add current/completed education, country/negation/sponsorship time, SMS employers, numeric versus offered range, invalid scalar years, punctuation collisions, and a generic request whose overlapping sensitive candidate must be absent. Assert existing question bank/screening behavior and exact key storage are unchanged.
-- [ ] Commit tested question recognition and risk guards.
+- [x] Run node --test --test-isolation=none test/domain.test.mjs test/server.test.mjs; verify new regressions fail before matching changes.
+- [x] Implement finite whole-label meanings and source provenance reuse. Preserve source screening labels as keys; never use matching-profile/resume facts as answers. Extend semantic yes/no comparison only for known student status. Make sensitive suggestion exclusion symmetric on requested and candidate questions, including legal, authorization, sponsorship, consent/SMS, salary/pay, certification, clearance and identity terms. Exact explicitly saved sensitive answers still follow existing guards.
+- [x] Rerun focused tests. Add current/completed education, country/negation/sponsorship time, SMS employers, numeric versus offered range, invalid scalar years, punctuation collisions, and a generic request whose overlapping sensitive candidate must be absent. Assert existing question bank/screening behavior and exact key storage are unchanged.
+- [x] Commit tested question recognition and risk guards.
 
 ### Task 2: Pure compatible groups and additive bootstrap metadata
 
@@ -119,7 +119,7 @@ assert.equal(resolveAnswer({label:'Years of C++ experience',type:'number'}, {}, 
 - /api/bootstrap keeps questions as raw visible occurrences and adds questionGroups plus questionCounts={distinctQuestions,affectedApplications,occurrences}. affectedApplications counts distinct known job IDs, not guessed companies. Groups retain enough original job context when the associated history is outside its latest-200 response.
 - Compatibility includes answerKey, control type, unique offered meanings, required/read-only semantics, explicit pattern and date/placeholder format, and reuse scope. Respect min/max/step constraints if present, without adding browser discovery changes in this phase. Ignore transient browser control IDs and opaque option values in stable draft identity.
 
-- [ ] Write pure/API tests: two same-key operational occurrences group once but remain two raw store entries; distinct type/options/date formats/SMS employer or unknown-employer job remain separate; C/C++/C# ambiguity metadata stays separate; saved value/source/reason/order/membership changes leave draftId stable. Synthetic conflicting saved resolutions share compatibility draftId but render distinct id values.
+- [x] Write pure/API tests: two same-key operational occurrences group once but remain two raw store entries; distinct type/options/date formats/SMS employer or unknown-employer job remain separate; C/C++/C# ambiguity metadata stays separate; saved value/source/reason/order/membership changes leave draftId stable. Synthetic conflicting saved resolutions share compatibility draftId but render distinct id values.
 
 ```js
 assert.equal(groups.length, 1);
@@ -132,10 +132,10 @@ assert.notEqual(splitConflicts[0].id, splitConflicts[1].id);
 assert.equal((await store.getQuestions()).length, 2);
 ```
 
-- [ ] Run node --test --test-isolation=none test/question-groups.test.mjs test/domain.test.mjs test/server.test.mjs and verify failures for missing grouping/bootstrap behavior.
-- [ ] Implement deterministic grouping without sorting/mutating stored questions or rewriting answers. Stable stringify immutable descriptor keys before hashing. Split incompatible resolution/provenance states for display; coalesce duplicate suggestions by source question/value/reason only. Operational failures stay occurrence-specific. Attach known job title/URL from full history before slicing response history, so every affected job retains a usable source link.
-- [ ] Rerun focused tests. Assert no store mutation, no removal of operational blockers after save, no extra answer write, false/zero display, grouping independent of intelligence toggle, and correct counts under missing/duplicate job IDs and more than 200 historical records.
-- [ ] Commit pure grouping and additive API metadata.
+- [x] Run node --test --test-isolation=none test/question-groups.test.mjs test/domain.test.mjs test/server.test.mjs and verify failures for missing grouping/bootstrap behavior.
+- [x] Implement deterministic grouping without sorting/mutating stored questions or rewriting answers. Stable stringify immutable descriptor keys before hashing. Split incompatible resolution/provenance states for display; coalesce duplicate suggestions by source question/value/reason only. Operational failures stay occurrence-specific. Attach known job title/URL from full history before slicing response history, so every affected job retains a usable source link.
+- [x] Rerun focused tests. Assert no store mutation, no removal of operational blockers after save, no extra answer write, false/zero display, grouping independent of intelligence toggle, and correct counts under missing/duplicate job IDs and more than 200 historical records.
+- [x] Commit pure grouping and additive API metadata.
 
 ### Task 3: One editor per group with durable save display and retained drafts
 
@@ -146,7 +146,7 @@ assert.equal((await store.getQuestions()).length, 2);
 - Keep answerEditor(question,draftKey,savedValue) backward compatible; add an optional draft adapter {get,set,clear} for grouped pending editors. Ordinary/common/SMS editors keep their existing Map behavior and save API contract.
 - Group drafts are {draftId,label,value,targetGroupId?}. A single current compatibility group may retain its draft across saved-value changes. If it splits, show a retained edit with explicit Use for this question buttons; neither subgroup receives it silently. If control/choices/format truly changes, show the old edit separately; do not fill a new incompatible editor. Clear only after successful save.
 
-- [ ] Reuse answerMemoryPage(t,{answers,questions,employers}) and createRecord for two synthetic job links. Write tests proving one editor/two occurrence links/reasons, Saved answer: No after Save and reload, distinct-question versus affected-job counts, and one answer-key update with raw questions retained.
+- [x] Reuse answerMemoryPage(t,{answers,questions,employers}) and createRecord for two synthetic job links. Write tests proving one editor/two occurrence links/reasons, Saved answer: No after Save and reload, distinct-question versus affected-job counts, and one answer-key update with raw questions retained.
 
 ```js
 assert.equal(await page.locator('#pending-questions .pending-question').count(), 1);
@@ -156,7 +156,7 @@ assert.match(await page.locator('#pending-questions').textContent(), /Saved answ
 assert.equal((await store.getQuestions()).length, 2);
 ```
 
-- [ ] Run PLAYWRIGHT_BROWSERS_PATH=./data/browsers node --test --test-isolation=none test/dashboard.test.mjs and observe RED results before replacing per-occurrence rendering.
-- [ ] Implement group rendering/draft adapters with safe text nodes and existing jobAnchor links. Use details/summary for affected applications; expose retained draft text and explicit target selection when needed. Preserve the last Save fix: successful POST refreshes saved status, rejected POST retains the draft and durable prior value, and operational failures are not hidden.
-- [ ] Test polling add/remove/reorder via store.saveQuestions and page.waitForResponse('/api/bootstrap'); saved source updates while typing; split/merge conflicts; changed choices/formats; unsupported/manual C-family questions; false/zero; failed save using a 10001-character draft; and unrelated common/SMS/library edits. Assert a review suggestion is never saved without explicit selection/Save.
-- [ ] Run complete npm test and npm run test:browser suites; inspect desktop and 390px screenshots without document overflow. Commit this independently usable question-intelligence workstream, then return only to the Phase 1 parent plan's final integration task.
+- [x] Run PLAYWRIGHT_BROWSERS_PATH=./data/browsers node --test --test-isolation=none test/dashboard.test.mjs and observe RED results before replacing per-occurrence rendering.
+- [x] Implement group rendering/draft adapters with safe text nodes and existing jobAnchor links. Use details/summary for affected applications; expose retained draft text and explicit target selection when needed. Preserve the last Save fix: successful POST refreshes saved status, rejected POST retains the draft and durable prior value, and operational failures are not hidden.
+- [x] Test polling add/remove/reorder via store.saveQuestions and page.waitForResponse('/api/bootstrap'); saved source updates while typing; split/merge conflicts; changed choices/formats; unsupported/manual C-family questions; false/zero; failed save using a 10001-character draft; and unrelated common/SMS/library edits. Assert a review suggestion is never saved without explicit selection/Save.
+- [x] Run complete npm test and npm run test:browser suites; inspect desktop and 390px screenshots without document overflow. Commit this independently usable question-intelligence workstream, then return only to the Phase 1 parent plan's final integration task.

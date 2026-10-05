@@ -304,6 +304,80 @@ The final read-only browser check confirmed populated pending fields and the
 saved-answer/retry status on the running app; no answers or applications were
 changed during that check.
 
+## Phase 1 — Intelligence — 2026-10-04
+
+The approved phase adds opt-in local job ranking and explicit saved-question
+recognition. Matching collects one bounded scan before applying, distributes
+discovery across validated family/region queries, assesses evidenced requirements,
+and orders eligible candidates by fit, freshness, then discovery order. Unknown
+required facts remain review cases. Strong repost suppression requires known
+company/title/location and the same description; attempted history is checked
+again after pacing and before reserving Submit. Legacy streaming mode, daily
+caps, dry runs, Stop, reservation, and uncertain-submission guards retain their
+existing behavior.
+
+Compatible pending questions now share one editor while every original label,
+job link, blocker, and failure reason remains available. Group compatibility
+respects control, displayed choices, formats, constraints, employer/skill scope,
+and saved resolution. Draft identity excludes changing answers, provenance,
+reasons, membership, and order. Splits require explicit draft targeting;
+incompatible changes retain edits separately. Saved No and zero values stay
+visible, and a rejected save keeps both the draft and prior durable answer.
+Current-student and finite skill-years aliases reuse only explicitly saved
+answers. Sensitive generic suggestions are excluded in both directions;
+ambiguous old C/C++/C# experience keys require manual confirmation.
+
+Fresh workstream verification on Node 24.21.0 / Playwright 1.62.1:
+
+- `npm test`: **140/140** unit, API, storage, parser, scoring, grouping, and runner tests.
+- `npm run test:browser`: **118/118** local Chromium adapter, forms, and dashboard scenarios.
+- Focused dashboard run: **34/34**, plus the final desktop/mobile fit-layout check.
+- Changed JavaScript syntax and Git whitespace checks passed.
+- Synthetic Settings, fit, grouped-question, saved-answer, and retained-draft
+  desktop/390px screenshots were inspected without horizontal document overflow.
+  History retains its existing horizontally scrollable table on small screens.
+
+Product changes are in `src/skills.mjs`, `src/job-parser.mjs`,
+`src/intelligence-config.mjs`, `src/search-profiles.mjs`,
+`src/job-intelligence.mjs`, `src/job-duplicates.mjs`, `src/question-groups.mjs`,
+and the existing domain, runner, LinkedIn adapter, answer memory, résumé keyword
+wrapper, bootstrap API, and dashboard assets. Tests extend the existing domain,
+store, server, runner, adapter, dashboard, and LinkedIn fixtures and add
+`test/job-intelligence.test.mjs` and `test/question-groups.test.mjs`.
+`package.json` enumerates the new pure tests; README explains the new controls.
+
+All verification used synthetic applicant information. No live applications
+were submitted or real stored answers edited. The score is a deterministic
+English-language rubric, not a hiring probability; ranking covers only the
+bounded scan. Fixture success does not prove every live employer layout.
+LinkedIn radio-entry timeouts, conditional forms, persistent recovery/attention
+queues, and collision-safe stored-question migration remain deferred to Phase 2
+or later. Phase 1 does not repair those separate browser-entry failures.
+
+The fresh independent whole-branch reviewer found five Important issues and
+no Critical or Minor issues. One root fix pass reproduced every finding before
+changing production code: unsectioned legal restrictions, applicant experience
+hidden by team wording, preferred-section minimum experience, incomplete
+geography creating false reposts, and unpaid leave mistaken for an unpaid role.
+An additional regression prevents explicitly waived citizenship requirements
+from becoming restrictions. The parser/runner regressions passed after their
+fixes, and the complete suites verify the final integration.
+
+Rulings retained from the review:
+
+- Live selector coverage, radio-entry timeouts, conditional rescanning, and
+  recovery stay within the approved later-phase boundary. Cost if wrong:
+  live employer forms can still block applications pending Phase 2.
+- General collision-safe saved-key migration and C/C++/C# wording outside
+  the finite recognized templates remain deferred. Cost if wrong: other
+  ambiguous language questions still need manual care until later work.
+- The reviewer set final documentation and local/GitHub delivery aside for
+  the root to verify directly. Cost if wrong: local or remote copies could
+  remain outdated; startup, stored-data comparison, and remote revision checks
+  are required before delivery is reported.
+
+Deferred minors: none. Local delivery results are appended after verification.
+
 ## Execution record
 
 # SDD ledger — plan: docs/superpowers/plans/2026-10-01-linkedin-easy-apply.md
