@@ -1,7 +1,8 @@
 import {basename,extname} from 'node:path';
 import {readFile} from 'node:fs/promises';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {normalizeQuestion,resolveAnswer} from '../domain.mjs';
+import {makeBlocker} from '../application-lifecycle.mjs';
 import {savedAnswerKey} from '../answer-memory.mjs';
 
 export function checkStopped(signal) {
@@ -113,14 +114,14 @@ export async function discoverFields(dialog) {
         const modern=modernRadioGroups.get(parent);
         const group=modern?.radios||controls.filter(input=>input.type==='radio' && (input.name||input.id)===name);
         const question=modern?.question||parent?.querySelector('legend,[id$="label"],.fb-dash-form-element__label')?.textContent.trim() || parent?.getAttribute('aria-label') || name;
-        fields.push({label:question,type:'radio',documentSelection:documentChooser(el),required:parent?.getAttribute('aria-required')==='true'||group.some(input=>input.required||input.getAttribute('aria-required')==='true')||/\*/.test(question),value:group.find(input=>input.checked)?.value||'',options:group.map(input=>({label:modern?.choices.get(input)||labelOf(input),value:input.value,id:input.getAttribute('data-applier-control')})),id:el.getAttribute('data-applier-control')});
+        fields.push({label:question,type:'radio',documentSelection:documentChooser(el),required:parent?.getAttribute('aria-required')==='true'||group.some(input=>input.required||input.getAttribute('aria-required')==='true')||/\*/.test(question),value:group.find(input=>input.checked)?.value||'',selectedLabel:group.find(input=>input.checked)?(modern?.choices.get(group.find(input=>input.checked))||labelOf(group.find(input=>input.checked))):'',scope:parent?.querySelector('legend')?.textContent||parent?.getAttribute('aria-label')||'',options:group.map(input=>({label:modern?.choices.get(input)||labelOf(input),value:input.value,id:input.getAttribute('data-applier-control')})),id:el.getAttribute('data-applier-control')});
       }else{
         let label=labelOf(el);
         if(type==='file' && !/resume|résumé|\bcv\b/i.test(label)){
           const nearby=el.closest('fieldset,section,.jobs-document-upload')?.textContent||'';
           if(/resume|résumé|\bcv\b/i.test(nearby))label='Resume';
         }
-        fields.push({label,type:el.tagName==='SELECT'?'select':type,required:el.required||el.getAttribute('aria-required')==='true'||/\*/.test(label),value:type==='checkbox'?el.checked:type==='file'?Array.from(el.files||[]).map(file=>file.name).join(', '):el.value||el.textContent||'',options:el.tagName==='SELECT'?Array.from(el.options).filter(option=>!option.disabled).map(option=>({label:option.textContent.trim(),value:option.value})):[],id:el.getAttribute('data-applier-control'),readOnly:Boolean(el.readOnly),...(el.pattern?{pattern:el.pattern}:{}),...(el.placeholder?{placeholder:el.placeholder}:{})});
+        fields.push({label,type:el.tagName==='SELECT'?'select':type,required:el.required||el.getAttribute('aria-required')==='true'||/\*/.test(label),value:type==='checkbox'?el.checked:type==='file'?Array.from(el.files||[]).map(file=>file.name).join(', '):typeof el.value==='string'?el.value:el.textContent||'',options:el.tagName==='SELECT'?Array.from(el.options).filter(option=>!option.disabled).map(option=>({label:option.textContent.trim(),value:option.value})):[],id:el.getAttribute('data-applier-control'),readOnly:Boolean(el.readOnly),selectedLabel:el.tagName==='SELECT'?el.selectedOptions[0]?.textContent.trim():'',...(el.min?{min:el.min}:{}),...(el.max?{max:el.max}:{}),...(el.step?{step:el.step}:{}),...(el.maxLength>=0?{maxLength:el.maxLength}:{}),...(el.pattern?{pattern:el.pattern}:{}),...(el.placeholder?{placeholder:el.placeholder}:{})});
       }
     }
     return fields;
@@ -131,20 +132,15 @@ export async function discoverFields(dialog) {
   });
 }
 function hasValue(field) {return field.type==='checkbox'?field.value===true:String(field.value||'').trim()!=='';}
-async function setNativeChecked(dialog,locator,value,signal){
-  checkStopped(signal);if(await locator.isChecked()===value)return;
-  const marker=randomUUID();
-  const labelled=await locator.evaluate((input,marker)=>{
-    const labels=Array.from(input.labels||[]).filter(label=>label.getClientRects().length&&getComputedStyle(label).visibility!=='hidden');
-    if(labels.length!==1)return false;
-    labels[0].setAttribute('data-applier-check-label',marker);return true;
-  },marker);
-  // LinkedIn draws some choice controls above a covered or zero-size input.
-  // Its associated HTML label toggles that exact input; verify the result below.
-  if(labelled)await dialog.locator(`[data-applier-check-label="${marker}"]`).click();
-  else await locator.setChecked(value);
-  checkStopped(signal);
-  if(await locator.isChecked()!==value)throw new Error('The control did not retain the saved choice');
+async function setNativeChecked(dialog,locator,value,signal,timeout=10000){
+ checkStopped(signal);if(await locator.isChecked()===value)return;
+ const marker=randomUUID();const labelled=await locator.evaluate((input,marker)=>{
+  const labels=Array.from(input.labels||[]).filter(label=>label.getClientRects().length&&getComputedStyle(label).visibility!=='hidden');
+  if(labels.length!==1)return false;labels[0].setAttribute('data-applier-check-label',marker);return true;
+ },marker);
+ if(labelled)await dialog.locator(`[data-applier-check-label="${marker}"]`).click({timeout});else await locator.setChecked(value,{timeout});
+ checkStopped(signal);
+ // Caller verifies a freshly discovered semantic control after any native change.
 }
 async function uploadResume(dialog,entry,{resumePath,signal,applicationState,uploadTimeout}) {
   if(!resumePath)throw new Error('No selected résumé');
@@ -184,7 +180,8 @@ async function uploadResume(dialog,entry,{resumePath,signal,applicationState,upl
       });
       if(!busy){
         await setNativeChecked(dialog,choice.locator,true,signal);
-        if(await choice.locator.isChecked()){
+        const freshChoices=(await discoverFields(dialog)).filter(item=>item.field.documentSelection).flatMap(item=>item.radios||[]).filter(option=>option.label.includes(filename));
+        if(freshChoices.length===1&&await freshChoices[0].locator.isChecked()){
           applicationState.resumeName=filename;applicationState.resumeVerified=true;return;
         }
       }
@@ -193,85 +190,114 @@ async function uploadResume(dialog,entry,{resumePath,signal,applicationState,upl
   }
   throw new Error('Upload was not confirmed as the selected application document');
 }
-export async function fillApplicationFields(dialog,{profile,answers,resumePath,signal,company='',applicationState={},uploadTimeout=10000}) {
-  const questions=[],errors=[];
-  let fields=await discoverFields(dialog);
-  const question=(field,reason,blocker='operational',suggestions=[])=>questions.push({key:field.key,label:field.label,type:field.type,required:field.required,company,answerKey:savedAnswerKey({...field,company}),options:field.options.map(({label,value})=>({label,value})),...(field.pattern?{pattern:field.pattern}:{}),...(field.placeholder?{placeholder:field.placeholder}:{}),reason,blocker,suggestions});
-  for(const entry of fields.filter(entry=>entry.field.type==='file')){
-    checkStopped(signal);
-    if(!/resume|résumé|\bcv\b/i.test(entry.field.label)){
-      if(entry.field.required||hasValue(entry.field))question(entry.field,'This upload needs a file the app does not have');
-      continue;
-    }
+
+const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export function fieldIdentity(field){return hash([field.label,field.type,field.scope||'',Boolean(field.required),field.pattern||'',field.placeholder||'',field.min||'',field.max||'',field.step||'',field.maxLength??null,(field.options||[]).map(option=>option.label)]);}
+function questionFor(field,company,reason,blocker='operational',suggestions=[]){return {key:field.key,label:field.label,type:field.type,required:field.required,company,answerKey:savedAnswerKey({...field,company}),options:field.options.map(({label,value})=>({label,value})),...(field.pattern?{pattern:field.pattern}:{}),...(field.placeholder?{placeholder:field.placeholder}:{}),reason,blocker,suggestions};}
+function desired(entry,options){
+ const field={...entry.field,company:options.company||''};if(field.documentSelection||field.type==='file'||field.type==='unsupported')return null;
+ const answer=resolveAnswer(field,options.profile||{},options.answers||{});
+ if(answer.kind==='fill')return answer;
+ if(field.required||answer.manual)return null;
+ if(field.type==='checkbox')return {kind:'fill',value:false};
+ if(['radio','select'].includes(field.type)){if(field.type==='select'&&field.options.some(o=>o.value===''))return {kind:'fill',value:'',optionLabel:field.options.find(o=>o.value==='').label};return null;}
+ return {kind:'fill',value:''};
+}
+function retained(entry,answer){
+ const f=entry.field;
+ if(['radio','select'].includes(f.type))return normalizeQuestion(f.selectedLabel)===normalizeQuestion(answer.optionLabel);
+ if(f.type==='checkbox')return f.value===answer.value;
+ if(f.type==='tel')return String(f.value).replace(/\D/g,'')===String(answer.value).replace(/\D/g,'');
+ if(f.type==='number'&&String(f.value)!=='')return Number(f.value)===Number(answer.value);
+ return String(f.value)===String(answer.value);
+}
+async function pause(ms,signal){const end=Date.now()+ms;while(Date.now()<end){checkStopped(signal);await new Promise(resolve=>setTimeout(resolve,Math.min(50,end-Date.now())));}checkStopped(signal);}
+async function safeStructure(dialog,fields,applicationState){
+ const details=await dialog.evaluate((root,resumeVerified)=>{
+  const categories=new Set();const visible=el=>Boolean(el.getClientRects().length);
+  for(const el of root.querySelectorAll('input,select,textarea'))if(!el.disabled&&el.willValidate&&(visible(el)||el.type==='radio'))for(const key of ['valueMissing','typeMismatch','patternMismatch','tooLong','tooShort','rangeUnderflow','rangeOverflow','stepMismatch','badInput','customError'])if(el.validity[key])categories.add(key);
+  if(Array.from(root.querySelectorAll('[role=alert],.artdeco-inline-feedback__message,.fb-dash-form-element__error-message')).some(el=>visible(el)&&el.textContent.trim()&&!(resumeVerified&&/^r[eé]sum[eé] uploaded successfully[.!]?$/i.test(el.textContent.trim()))))categories.add('employer_feedback');
+    const loading=Array.from(root.querySelectorAll('[role=progressbar]')).filter(visible).some(bar=>{
+   const now=Number(bar.getAttribute('aria-valuenow'));if(!bar.hasAttribute('aria-valuenow')||bar.getAttribute('aria-valuemin')!=='0'||bar.getAttribute('aria-valuemax')!=='100'||!Number.isFinite(now)||now<0||now>100)return true;
+   for(let area=bar.parentElement,depth=0;area&&area!==root&&depth<2;area=area.parentElement,depth++){
+    if(area.querySelector('input,select,textarea,button,[role=button],[role=combobox]')||area.querySelectorAll('[role=progressbar]').length!==1)break;
+    for(const label of area.querySelectorAll('p,span,div')){if(label.children.length||!visible(label))continue;const match=label.textContent.trim().match(/^(\d+)\s*\/\s*(\d+)\s+pages?$/i);if(match){const page=Number(match[1]),total=Number(match[2]);if(page>=1&&page<=total&&Math.abs(now-page/total*100)<=1)return false;}}
+   }return true;
+  });
+  return {validationCategories:[...categories],busy:loading||root.matches('[aria-busy=true]')||Array.from(root.querySelectorAll('[aria-busy=true]')).some(visible)};
+ },applicationState?.resumeVerified===true);
+ const controlCounts={};for(const {field} of fields)controlCounts[field.type]=(controlCounts[field.type]||0)+1;
+ return {...details,controlCounts,fingerprints:fields.filter(e=>!e.field.documentSelection&&e.field.type!=='file').map(e=>fieldIdentity(e.field))};
+}
+export async function verifyApplicationFields(dialog,options={}){
+ checkStopped(options.signal);const fields=await discoverFields(dialog),questions=[],blockers=[],errors=[];
+ const company=options.company||'',state=options.applicationState||{},identities=new Map();
+ for(const e of fields){const id=fieldIdentity(e.field);identities.set(id,(identities.get(id)||0)+1);}
+ const add=(field,reason,code,suggestions=[])=>{questions.push(questionFor(field,company,reason,code==='missing_answer'?'missing_answer':'operational',suggestions));blockers.push(makeBlocker(code,{phase:'form',controlFingerprint:fieldIdentity(field)}));};
+ for(const entry of fields){
+  checkStopped(options.signal);const f=entry.field;
+  if(f.documentSelection){const matches=entry.radios?.filter(o=>state.resumeVerified&&o.label.includes(state.resumeName))||[];if(matches.length!==1||!await matches[0].locator.isChecked())add(f,'Could not verify the selected résumé','resume_upload');continue;}
+  if(f.type==='file'){if(/resume|résumé|\bcv\b/i.test(f.label)){if(!state.resumeVerified)add(f,'The selected résumé has not been verified','resume_upload');}else if(f.required||hasValue(f))add(f,'This upload needs a file the app does not have','unsupported_control');continue;}
+  if(identities.get(fieldIdentity(f))!==1){add(f,'More than one compatible field was found','form_changed');continue;}
+  if(f.type==='unsupported'){if(f.required||hasValue(f))add(f,'This control is not supported automatically','unsupported_control');continue;}
+  const answer=resolveAnswer({...f,company},options.profile||{},options.answers||{}),target=desired(entry,options);
+  if(answer.kind==='missing'&&f.required){add(answer.manual?{...f,type:'unsupported'}:f,answer.reason,answer.manual?'unsupported_control':'missing_answer',answer.suggestions);continue;}
+  if(answer.manual&&(f.required||hasValue(f))){add({...f,type:'unsupported'},answer.reason,'unsupported_control',answer.suggestions);continue;}
+  if(!target){if(hasValue(f))add(f,'Unknown prefilled answer cannot be cleared safely','entry_verification');continue;}
+  if(!retained(entry,target))add(f,'The field did not retain the saved answer','entry_verification');
+  else if(f.type==='checkbox'&&f.required&&!target.value)add(f,'The required checkbox needs an explicit yes answer','unsupported_control');
+ }
+ const validation=await validationErrors(dialog,state);errors.push(...validation);
+ const structure=await safeStructure(dialog,fields,state);
+ if(validation.length)blockers.push(makeBlocker('validation',{phase:'form'}));if(structure.busy)blockers.push(makeBlocker('form_changed',{phase:'form'}));
+ return {ok:!questions.length&&!errors.length&&!structure.busy,questions,errors,blockers,signature:hash(fields.map(e=>[fieldIdentity(e.field),e.field.value,e.field.selectedLabel])),safeStructure:structure};
+}
+export async function fillApplicationFields(dialog,options){
+ const {signal,applicationState={},resumePath,uploadTimeout=10000,actionTimeout=10000,quietMs=300,maxPasses=8,onAction}=options;options={...options,applicationState};
+ const end=Date.now()+actionTimeout,failures=new Map();let uploadError=null;
+ const remaining=()=>Math.max(1,end-Date.now());
+ for(const entry of (await discoverFields(dialog)).filter(e=>e.field.type==='file'&&/resume|résumé|\bcv\b/i.test(e.field.label))){
+  try{if(!applicationState.resumeVerified)await uploadResume(dialog,entry,{resumePath,signal,applicationState,uploadTimeout:Math.min(uploadTimeout,remaining())});}
+  catch(error){checkStopped(signal);uploadError=`Résumé: ${error.message.split('\n')[0]}`;}
+ }
+ for(let pass=0;pass<maxPasses&&Date.now()<end;pass++){
+  checkStopped(signal);let acted=false;const scanned=await discoverFields(dialog);
+  for(const original of scanned){
+   checkStopped(signal);const fingerprint=fieldIdentity(original.field);
+   if(original.field.documentSelection||['file','unsupported'].includes(original.field.type))continue;
+   let fresh=(await discoverFields(dialog)).filter(e=>fieldIdentity(e.field)===fingerprint);if(fresh.length!==1)continue;
+   let entry=fresh[0],answer=desired(entry,options);if(!answer||retained(entry,answer))continue;
+   if(failures.has(fingerprint))continue;
+   for(let retry=0;retry<2;retry++){
+    checkStopped(signal);if(Date.now()>=end)break;fresh=(await discoverFields(dialog)).filter(e=>fieldIdentity(e.field)===fingerprint);if(fresh.length!==1)break;entry=fresh[0];answer=desired(entry,options);if(!answer||retained(entry,answer))break;
+    await onAction?.({operation:entry.field.type,controlFingerprint:fingerprint,retry});checkStopped(signal);
     try{
-      if(!applicationState.resumeVerified)await uploadResume(dialog,entry,{resumePath,signal,applicationState,uploadTimeout});
-    }catch(error){checkStopped(signal);errors.push(`Résumé: ${error.message.split('\n')[0]}`);}
+     if(entry.readOnly)throw new Error('Read-only value differs from your saved answer');
+     if(entry.field.type==='checkbox')await setNativeChecked(dialog,entry.locator,answer.value,signal,remaining());
+     else if(entry.field.type==='radio'){const choices=entry.radios.filter(o=>normalizeQuestion(o.label)===normalizeQuestion(answer.optionLabel));if(choices.length!==1)throw new Error('Could not identify exact choice');await setNativeChecked(dialog,choices[0].locator,true,signal,remaining());}
+     else if(entry.field.type==='select')await entry.locator.selectOption({label:answer.optionLabel},{timeout:remaining()});
+     else await entry.locator.fill(answer.value,{timeout:remaining()});
+     acted=true;
+    }catch(error){checkStopped(signal);if(retry===1)failures.set(fingerprint,makeBlocker(error.name==='TimeoutError'?'entry_timeout':'entry_verification',{phase:'form',controlFingerprint:fingerprint}));}
+    const after=(await discoverFields(dialog)).filter(e=>fieldIdentity(e.field)===fingerprint);
+    if(after.length===1&&retained(after[0],answer)){
+     failures.delete(fingerprint);
+     if(answer.sourceQuestion&&answer.match!=='profile'&&answer.sourceQuestion!==entry.field.key){applicationState.answerMatches ||= [];const match={label:entry.field.label,company:options.company||'',answer:answer.answer,sourceQuestion:answer.sourceQuestion};const index=applicationState.answerMatches.findIndex(m=>m.label===match.label&&m.company===match.company);if(index<0)applicationState.answerMatches.push(match);else applicationState.answerMatches[index]=match;}
+     break;
+    }
+    if(retry===1)failures.set(fingerprint,makeBlocker('entry_verification',{phase:'form',controlFingerprint:fingerprint}));
+   }
   }
-  // Uploading adds controls asynchronously; rebuild locators after acceptance.
-  fields=await discoverFields(dialog);
-  for(const entry of fields){
-    checkStopped(signal);
-    const {field:discovered,locator,radios,readOnly}=entry;
-    const field={...discovered,company};
-    if(field.type==='file')continue;
-    // Only structural document components are résumé selectors. Ordinary CV
-    // screening questions continue through the exact saved-answer resolver.
-    if(field.documentSelection){
-      const matches=radios?.filter(option=>applicationState.resumeVerified && option.label.includes(applicationState.resumeName))||[];
-      if(matches.length!==1 || !await matches[0].locator.isChecked())question(field,'Could not verify the selected résumé');
-      continue;
-    }
-    if(field.type==='unsupported'){
-      if(field.required||hasValue(field))question(field,'This control is not supported automatically');
-      continue;
-    }
-    const answer=resolveAnswer(field,profile,answers);
-    if(answer.kind==='missing'){
-      if(answer.manual){
-        if(field.required||hasValue(field))question({...field,type:'unsupported'},answer.reason,'operational',answer.suggestions);
-        continue;
-      }
-      if(field.required){question(field,answer.reason,'missing_answer',answer.suggestions);continue;}
-      if(!hasValue(field))continue;
-      try{
-        if(readOnly)throw new Error('The prefilled value cannot be cleared');
-        if(field.type==='checkbox')await setNativeChecked(dialog,locator,false,signal);
-        else if(field.type==='select' && field.options.some(option=>option.value===''))await locator.selectOption('');
-        else if(field.type==='radio'||field.type==='select')throw new Error('The prefilled choice cannot be cleared safely');
-        else await locator.fill('');
-      }catch{question(field,'Unknown prefilled answer cannot be cleared safely');}
-      continue;
-    }
-    try{
-      if(field.type==='checkbox'){
-        await setNativeChecked(dialog,locator,answer.value,signal);
-        if(field.required && !answer.value){question(field,'The required checkbox needs an explicit yes answer');continue;}
-      }else if(field.type==='select'){
-        await locator.selectOption({label:answer.optionLabel});
-        const selected=await locator.locator('option:checked').textContent();
-        if(normalizeQuestion(selected)!==normalizeQuestion(answer.optionLabel))throw new Error('The field did not retain the saved choice');
-      }
-      else if(field.type==='radio'){
-        const choices=radios.filter(option=>normalizeQuestion(option.label)===normalizeQuestion(answer.optionLabel));
-        if(choices.length!==1)throw new Error('Could not identify the exact saved choice');
-        await setNativeChecked(dialog,choices[0].locator,true,signal);
-      }
-      else if(readOnly){if(String(field.value)!==answer.value)throw new Error('Read-only value differs from your saved answer');}
-      else await locator.fill(answer.value);
-      if(field.type!=='radio' && field.type!=='checkbox'){
-        const actual=await locator.inputValue();
-        const equal=field.type==='tel'?actual.replace(/\D/g,'')===answer.value.replace(/\D/g,''):field.type==='number'?Number(actual)===Number(answer.value):actual===answer.value;
-        if(!equal)throw new Error('The field did not retain your saved answer');
-      }
-      if(answer.match!=='profile'&&answer.sourceQuestion!==field.key){
-        applicationState.answerMatches ||= [];
-        const match={label:field.label,company,answer:answer.answer,sourceQuestion:answer.sourceQuestion};
-        const index=applicationState.answerMatches.findIndex(previous=>previous.label===field.label&&previous.company===company);
-        if(index<0)applicationState.answerMatches.push(match);else applicationState.answerMatches[index]=match;
-      }
-    }catch(error){question(field,`Could not enter the saved answer: ${error.message.split('\n')[0]}`);}
+  const before=await verifyApplicationFields(dialog,options);await pause(Math.min(quietMs,remaining()),signal);const final=await verifyApplicationFields(dialog,options);
+  if(!acted&&before.signature===final.signature&&!final.safeStructure.busy||before.ok&&final.ok&&before.signature===final.signature){
+   if(uploadError){final.errors.unshift(uploadError);final.blockers.unshift(makeBlocker('resume_upload',{phase:'form'}));}
+   for(const [fingerprint,blocker] of failures)if(final.safeStructure.fingerprints.includes(fingerprint)&&final.questions.some(q=>fieldIdentity(q)===fingerprint))final.blockers.push(blocker);
+   // Missing answers are reported as questions, without duplicating native required validation.
+   if(final.questions.length)final.errors=uploadError?[uploadError]:[];
+   return final.questions.length||final.errors.length||final.blockers.length?{questions:final.questions,errors:final.errors,blockers:final.blockers}:{questions:[],errors:[]};
   }
-  return {questions,errors};
+ }
+ const final=await verifyApplicationFields(dialog,options);return {questions:final.questions,errors:uploadError?[uploadError]:final.errors,blockers:[makeBlocker('form_changed',{phase:'form'}),...final.blockers]};
 }
 export async function validationErrors(dialog,{resumeVerified=false}={}) {
   return dialog.evaluate((root,resumeVerified)=>{

@@ -4,7 +4,7 @@ import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {chromium} from 'playwright';
-import {discoverFields,fillApplicationFields,validationErrors} from '../src/browser/forms.mjs';
+import {discoverFields,fillApplicationFields,validationErrors,fieldIdentity,verifyApplicationFields} from '../src/browser/forms.mjs';
 import {modernApplication} from './fixtures/modern-application.mjs';
 import {modernScreening,screeningLabels} from './fixtures/modern-screening.mjs';
 
@@ -378,4 +378,41 @@ test('other mandatory custom widgets make the hydrated native group unsupported 
     assert.equal(result.questions[0].required,true,attributes);
     assert.equal(await dialog.locator('fieldset').first().locator('input:checked').count(),0,attributes);
   }
+});
+
+const savedScreening={'are you legally authorized to work in the united states':'Yes','will you now or in the future require sponsorship to work in the united states':'No','sms consent for bge inc':'No'};
+async function dynamic(t,scenario={}){const ctx=await setup(t);await ctx.page.setContent(modernScreening(scenario));ctx.options={...ctx.options,company:'BGE, Inc.',answers:savedScreening,actionTimeout:1500};return ctx;}
+test('semantic identity preserves punctuation, ignores marker/value and distinguishes constraints',()=>{
+ const field={label:'School?*',type:'text',required:true,options:[]};assert.equal(fieldIdentity(field),fieldIdentity({...field,value:'private',id:'changed'}));assert.notEqual(fieldIdentity(field),fieldIdentity({...field,label:'School!*'}));assert.notEqual(fieldIdentity(field),fieldIdentity({...field,pattern:'[A-Z]+'}));
+});
+for(const option of ['replaceOnChoiceChange','replaceNextGroupOnChoiceChange'])test(`dynamic form ${option} reacquires without toggling the saved choice twice`,async t=>{
+ const {page,dialog,options}=await dynamic(t,{[option]:true});assert.deepEqual(await fillApplicationFields(dialog,options),{questions:[],errors:[]});
+ assert.equal(await dialog.locator('input:checked').count(),3);assert.equal(await page.evaluate(()=>window.fixtureState.labelClicks),3);assert.equal(await page.evaluate(()=>window.fixtureState.groupReplacements),1);assert.equal((await verifyApplicationFields(dialog,options)).ok,true);
+});
+for(const hasAnswer of [false,true])test(`delayed conditional school ${hasAnswer?'fills the saved answer':'becomes a visible missing question'}`,async t=>{
+ const {dialog,options}=await dynamic(t,{delayedConditional:true});const result=await fillApplicationFields(dialog,{...options,answers:{...options.answers,...(hasAnswer?{'university name':'Synthetic University'}:{})}});
+ assert.equal(result.questions.some(q=>q.label==='University name*'),!hasAnswer);if(hasAnswer)assert.equal(await dialog.locator('[name=school]').inputValue(),'Synthetic University');
+});
+test('delayed custom required control is blocked and diagnostic structure never includes answers',async t=>{
+ const {dialog,options}=await dynamic(t,{delayedConditional:true,customConditional:true});const result=await fillApplicationFields(dialog,options);assert.ok(result.questions.some(q=>q.type==='unsupported'));
+ const verified=await verifyApplicationFields(dialog,options);assert.equal(verified.ok,false);assert.ok(verified.blockers.some(b=>b.code==='unsupported_control'));assert.equal(JSON.stringify(verified.safeStructure).includes('BGE'),false);
+});
+test('removed conditional questions do not survive a controlling answer',async t=>{
+ const {dialog,options}=await dynamic(t,{removeConditionalOnChoiceChange:true});const result=await fillApplicationFields(dialog,options);assert.deepEqual(result,{questions:[],errors:[]});
+});
+test('a reset earlier answer is revisited after the quiet interval',async t=>{
+ const {page,dialog,options}=await dynamic(t,{resetEarlierOnChoiceChange:true});const result=await fillApplicationFields(dialog,options);assert.deepEqual(result,{questions:[],errors:[]});assert.equal(await dialog.locator('input:checked').count(),3);assert.equal(await page.evaluate(()=>window.fixtureState.labelClicks),4);
+});
+test('continually resetting answers stop within the pass/deadline bound',async t=>{
+ const {dialog,options}=await dynamic(t,{continualReset:true});const start=Date.now();const result=await fillApplicationFields(dialog,{...options,maxPasses:3,actionTimeout:900});assert.ok(result.blockers.some(b=>b.code==='form_changed'||b.code==='entry_verification'));assert.ok(Date.now()-start<2500);
+});
+test('ambiguous identities block without entering either control',async t=>{
+ const {dialog,options}=await dynamic(t,{ambiguous:true});const result=await fillApplicationFields(dialog,{...options,answers:{...options.answers,ambiguous:'secret'}});assert.ok(result.blockers.some(b=>b.code==='form_changed'));assert.deepEqual(await dialog.locator('input:not([type=radio])').evaluateAll(inputs=>inputs.map(i=>i.value)),['','']);
+});
+test('Stop interrupts the bounded quiet/reacquisition wait',async t=>{
+ const {dialog,options}=await dynamic(t);const controller=new AbortController();const promise=fillApplicationFields(dialog,{...options,signal:controller.signal,quietMs:1000});await dialog.locator('fieldset').last().locator('input').last().waitFor({state:'attached'});controller.abort();await assert.rejects(promise,/Stopped/);
+});
+test('read-only final verification detects a new required field and a changed selected resume',async t=>{
+ const {page,dialog,options}=await setup(t);await fillApplicationFields(dialog,options);await dialog.locator('#old-document').check();assert.equal((await verifyApplicationFields(dialog,options)).ok,false);
+ await page.evaluate(()=>document.querySelector('[role=dialog]').insertAdjacentHTML('beforeend','<label>New required*<input required></label>'));const verify=await verifyApplicationFields(dialog,options);assert.ok(verify.questions.some(q=>q.label==='New required*'));assert.equal(await dialog.locator('input:not([type=radio])').inputValue(),'');
 });

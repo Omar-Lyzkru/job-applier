@@ -6,7 +6,7 @@ export const screeningLabels=[
   'Will you now or anytime after graduation require sponsorship for a work visa (like an H1b) to work legally in the US?',
   'If you provided a phone number, do you consent to receiving follow-up communication via text message (or SMS message) regarding your application status?'
 ];
-export function modernScreening(){
+export function modernScreening(options={}){
   return `<!doctype html><style>
     input[type=radio]{position:absolute;width:0;height:0;margin:0}
     label{display:inline-block;width:22px;height:22px;border:1px solid #888;cursor:pointer}
@@ -19,5 +19,22 @@ export function modernScreening(){
           <label for="choice-${index}-${option}"></label>
         </div><div><p>${choice}</p></div></div></div>`).join('')}
       </div></fieldset>
-    </div>`).join('')}</div>`;
+    </div>`).join('')}</div><script>
+ const options=${JSON.stringify(options)};window.fixtureState={labelClicks:0,groupReplacements:0,changes:0};
+ const root=document.querySelector('[role=dialog]');let changed=false;
+ root.addEventListener('click',event=>{if(event.target.matches('label'))window.fixtureState.labelClicks++;});
+ function replace(group){const fresh=group.cloneNode(true);fresh.querySelectorAll('[data-applier-control]').forEach(el=>el.removeAttribute('data-applier-control'));fresh.querySelectorAll('input').forEach((input,index)=>{const old=input.id;input.id='fresh-'+old;fresh.querySelector('label[for="'+old+'"]').htmlFor=input.id;});group.replaceWith(fresh);window.fixtureState.groupReplacements++;}
+ root.addEventListener('change',event=>{
+  window.fixtureState.changes++;const group=event.target.closest('fieldset');if(!group)return;
+  if(options.continualReset)event.target.checked=false;
+  if(changed)return;changed=true;
+  if(options.replaceOnChoiceChange)replace(group);
+  if(options.replaceNextGroupOnChoiceChange)replace(root.querySelectorAll('fieldset')[1]);
+  if(options.delayedConditional)setTimeout(()=>{root.insertAdjacentHTML('beforeend',options.customConditional?'<div role="checkbox" aria-required="true" aria-label="Custom consent*"></div>':'<div id="conditional"><label>University name*<input name="school" required></label></div>');},150);
+  if(options.removeConditionalOnChoiceChange)document.querySelector('#conditional')?.remove();
+  if(options.resetEarlierOnChoiceChange)setTimeout(()=>{event.target.checked=false;},150);
+ });
+ if(options.removeConditionalOnChoiceChange)root.insertAdjacentHTML('afterbegin','<div id="conditional"><label>University name*<input name="school" required></label></div>');
+ if(options.ambiguous)root.insertAdjacentHTML('beforeend','<label>Ambiguous*<input required></label><label>Ambiguous*<input required></label>');
+ </script>`;
 }
