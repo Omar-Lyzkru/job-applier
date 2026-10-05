@@ -98,9 +98,36 @@ Résumé uploads support both file fields and LinkedIn's newer **Upload resume**
 
 In **Answers**, choice questions such as **Phone country code** let you type to filter the offered choices and view the matching list. Click a choice or use the arrow keys and Enter, then **Save this answer**. Exact typed labels also save; partial names must be selected from the list. The saved answer uses LinkedIn's displayed label rather than its internal option value.
 
-Pending questions show the saved answer after saving or reloading. If LinkedIn could not enter it, the card keeps its failure reason and explains that entry needs a retry; this does not mean the answer was lost. Unsaved edits stay in the field if saving fails.
+Compatible pending repeats share one editor. The count shows distinct questions
+and affected applications; expand **Affected applications** to see every original
+label, employer, job link, and failure reason. Different choices, controls, date
+formats, employer consent, or conflicting saved provenance keep separate cards.
+Saving writes the existing answer key once and preserves operational blockers.
 
-**Common questions** includes school, degree, major, graduation, position, location, department, address, US work authorization, and US visa sponsorship. The app reuses your saved answers for recognized equivalent wording and shows the original saved question. Work authorization and sponsorship remain separate. Conflicting answers, uncertain wording, unavailable choices, and incompatible graduation date formats need your review. A suggested answer is saved only after you choose it and press Save.
+Pending questions show the saved answer after saving or reloading. If LinkedIn
+could not enter it, the card keeps its failure reason and explains that entry
+needs a retry; this does not mean the answer was lost. Unsaved edits survive
+polling, membership changes, other answer saves, and rejected saves. If a group
+splits, choose **Use for this question** to place a retained edit explicitly. If
+choices or formats change, the old edit remains separately visible. Unsaved
+edits remain in the current page session; press Save before closing or reloading.
+
+**Common questions** includes current student status, school, degree, major,
+graduation, position, location, department, address, US work authorization, and
+US visa sponsorship. The app reuses your explicitly saved answers for finite
+recognized wording and shows their source. It recognizes years of Java,
+JavaScript, TypeScript, Python, Rust, React, Node.js, SQL, PostgreSQL, and Git
+experience, preserving the distinction between total and professional years.
+Matching-profile facts and résumé skills never fill these screening answers.
+Current study and completed education, work authorization and sponsorship, and
+each employer's consent remain separate. Old C/C++/C# experience keys can
+collide, so those questions require manual confirmation in LinkedIn.
+
+Conflicting answers, uncertain wording, unavailable choices, and incompatible
+graduation date formats need review. Generic similar wording only suggests
+ordinary answers; legal, consent, salary, certification, clearance, and identity
+questions are excluded in both directions. A suggested answer is saved only
+after you choose it and press Save.
 
 **Text message consent** is saved separately for each employer. Choose an employer and explicitly answer Yes or No; neither is selected for you. Consent for application updates does not answer a differently worded marketing, calling, or negative consent question. Unknown employers require completion directly in LinkedIn.
 

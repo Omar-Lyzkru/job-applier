@@ -112,6 +112,7 @@ test('browser: fit result exposes its score, matched skills and uncertainty with
   assert.match(await page.locator('#recent-body').textContent(),/Matched skills: Python/);
   assert.match(await page.locator('#recent-body').textContent(),/Missing skills: Git/);
   assert.match(await page.locator('#recent-body').textContent(),/Required: Python/);
+  await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/phase1-fit-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve('test-artifacts/phase1-fit-mobile.png'),fullPage:true});
 });
 
 test('browser: phone country answers support typing, visible matching choices, keyboard selection and exact saved labels',async t=>{
@@ -425,6 +426,70 @@ async function answerMemoryPage(t,{answers={},questions=[],employers=[]}={}){
 
 const authorizationKey='are you legally authorized to work in the united states';
 const sponsorshipKey='will you now or in the future require sponsorship to work in the united states';
+
+const repeatQuestion={key:'evening work',label:'Evening work?',type:'radio',required:true,options:[{label:'Yes',value:'y'},{label:'No',value:'n'}],jobId:'1001',company:'First employer',blocker:'operational',reason:'Selection timed out'};
+const waitBootstrap=page=>page.waitForResponse(response=>response.url().endsWith('/api/bootstrap'));
+
+test('browser: grouped repeats have one editor, all job details, distinct counts and durable saved status',async t=>{
+  const second={...repeatQuestion,jobId:'1002',company:'Second employer',reason:'Read-only answer differs'};
+  const {store,page}=await answerMemoryPage(t,{questions:[repeatQuestion,second],employers:['First employer','Second employer']});
+  const pending=page.locator('#pending-questions'),card=pending.locator('.pending-question');
+  assert.equal(await card.count(),1);assert.equal(await pending.getByLabel('Answer for Evening work?',{exact:true}).count(),1);
+  assert.equal(await page.locator('#question-count').textContent(),'1');assert.match(await page.locator('#question-summary').textContent(),/1 question.*2 applications/);
+  await card.locator('summary').click();assert.equal(await card.locator('a[href*="/jobs/view/"]').count(),2);
+  assert.match(await card.textContent(),/Selection timed out/);assert.match(await card.textContent(),/Read-only answer differs/);
+  await card.getByLabel('Answer for Evening work?',{exact:true}).selectOption('No');await card.getByRole('button',{name:'Save this answer',exact:true}).click();await page.getByText('Answer saved',{exact:true}).waitFor();
+  assert.deepEqual(await store.getAnswers(),{'evening work':'No'});assert.equal((await store.getQuestions()).length,2);assert.match(await card.textContent(),/Saved answer: No/);
+  await page.reload();await page.getByRole('button',{name:'Answers',exact:true}).click();assert.match(await card.textContent(),/Saved answer: No/);
+  await card.locator('summary').click();await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/grouped-questions-desktop.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve('test-artifacts/grouped-questions-mobile.png'),fullPage:true});
+});
+
+test('browser: grouped drafts survive polling membership, saved source changes and unrelated saves',async t=>{
+  const q={...repeatQuestion,label:'Why this company?',key:'why this company',type:'text',options:[]};
+  const {store,page}=await answerMemoryPage(t,{questions:[q],answers:{'why this company':'Prior','favorite color':'Blue'},employers:['First employer']});
+  await page.getByLabel('Answer for Why this company?',{exact:true}).fill('My retained edit');
+  let refreshed=waitBootstrap(page);await store.saveQuestions([{...q,jobId:'1002',reason:'New failure'},q]);await refreshed;await page.getByText('2 occurrences',{exact:true}).waitFor();
+  assert.equal(await page.getByLabel('Answer for Why this company?',{exact:true}).inputValue(),'My retained edit');
+  refreshed=waitBootstrap(page);await store.saveAnswers({'why this company':'Updated saved response','favorite color':'Blue'});await refreshed;await page.getByText(/Saved answer: Updated saved response/).waitFor();
+  assert.equal(await page.getByLabel('Answer for Why this company?',{exact:true}).inputValue(),'My retained edit');
+  await page.getByLabel('Employer for text messages',{exact:true}).selectOption('First employer');await page.getByLabel('Text message consent',{exact:true}).selectOption('No');await page.getByRole('button',{name:'Save text message consent',exact:true}).click();await page.getByText('Text message consent saved for First employer',{exact:true}).waitFor();
+  assert.equal(await page.getByLabel('Answer for Why this company?',{exact:true}).inputValue(),'My retained edit');
+  const library=page.locator('#answer-library').getByLabel('Answer for favorite color',{exact:true});await library.fill('Green');await library.locator('xpath=ancestor::article[1]').getByRole('button',{name:'Update answer',exact:true}).click();await page.getByText('Answer saved',{exact:true}).waitFor();
+  assert.equal(await page.getByLabel('Answer for Why this company?',{exact:true}).inputValue(),'My retained edit');
+  await page.getByText('Common questions',{exact:true}).click();const common=page.locator('#common-questions').getByLabel('Answer for Are you currently a student?',{exact:true});await common.selectOption('Yes');await common.locator('xpath=ancestor::article[1]').getByRole('button',{name:'Save this answer',exact:true}).click();await page.getByText('Answer saved',{exact:true}).waitFor();
+  assert.equal(await page.getByLabel('Answer for Why this company?',{exact:true}).inputValue(),'My retained edit');
+  refreshed=waitBootstrap(page);await store.saveQuestions([q]);await refreshed;await page.getByText('1 occurrence',{exact:true}).waitFor();assert.equal(await page.getByLabel('Answer for Why this company?',{exact:true}).inputValue(),'My retained edit');
+});
+
+test('browser: a changed choice or date format retains the old edit separately',async t=>{
+  const q={...repeatQuestion,label:'Location preference',key:'location preference',type:'select',options:[{label:'Houston',value:'h'},{label:'Austin',value:'a'}]};
+  const date={...repeatQuestion,label:'Expected graduation',key:'expected graduation',type:'text',options:[],pattern:'[A-Za-z]+ [0-9]{4}',placeholder:'Term YYYY'};
+  const {store,page}=await answerMemoryPage(t,{questions:[q,date]});
+  const pending=page.locator('#pending-questions');await pending.getByRole('combobox',{name:'Answer for Location preference',exact:true}).fill('Houston');await pending.getByLabel('Answer for Expected graduation',{exact:true}).fill('Spring 2028');
+  const refreshed=waitBootstrap(page);await store.saveQuestions([{...q,options:[{label:'Dallas',value:'d'},{label:'Austin',value:'a'}]},{...date,pattern:'[0-9]{2}/[0-9]{4}',placeholder:'MM/YYYY'}]);await refreshed;
+  await page.locator('#retained-question-drafts').getByText('Houston',{exact:true}).waitFor();assert.equal(await pending.getByRole('combobox',{name:'Answer for Location preference',exact:true}).inputValue(),'');assert.equal(await pending.getByLabel('Answer for Expected graduation',{exact:true}).inputValue(),'');
+  assert.match(await page.locator('#retained-question-drafts').textContent(),/Spring 2028/);assert.equal(await page.locator('#retained-question-drafts button').count(),0);assert.deepEqual(await store.getAnswers(),{});
+  await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/retained-drafts-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve('test-artifacts/retained-drafts-mobile.png'),fullPage:true});
+});
+
+test('browser: split and merged resolution groups preserve edits until an explicit target is chosen',async t=>{
+  const {store,page}=await answerMemoryPage(t,{questions:[repeatQuestion]});
+  await page.getByLabel('Answer for Evening work?',{exact:true}).selectOption('No');
+  let split=true;
+  await page.route('**/api/bootstrap',async route=>{const response=await route.fetch(),data=await response.json();if(split){const group=data.questionGroups[0];data.questionGroups=[{...group,id:'first-split',savedAnswer:{answer:'Yes',displayAnswer:'Yes'},question:{...group.question,savedAnswer:{answer:'Yes',displayAnswer:'Yes'}}},{...group,id:'second-split',savedAnswer:null,question:{...group.question,company:'Second employer'}}];data.questionCounts.distinctQuestions=2;}await route.fulfill({response,json:data});});
+  await waitBootstrap(page);await page.waitForFunction(()=>document.querySelectorAll('#pending-questions .pending-question').length===2);
+  const editors=page.getByLabel('Answer for Evening work?',{exact:true});assert.deepEqual(await editors.evaluateAll(inputs=>inputs.map(input=>input.value)),['Yes','']);
+  const retained=page.locator('#retained-question-drafts');await retained.getByText('No',{exact:true}).waitFor();await retained.getByRole('button',{name:/Use for this question/}).nth(1).click();
+  assert.deepEqual(await editors.evaluateAll(inputs=>inputs.map(input=>input.value)),['Yes','No']);assert.deepEqual(await store.getAnswers(),{});
+  split=false;await waitBootstrap(page);await page.waitForFunction(()=>document.querySelectorAll('#pending-questions .pending-question').length===1);assert.equal(await page.getByLabel('Answer for Evening work?',{exact:true}).inputValue(),'No');
+});
+
+test('browser: ambiguous C-family questions stay visible with no futile Save editor',async t=>{
+  const questions=['C','C++','C#'].map(skill=>({...repeatQuestion,label:`Years of ${skill} experience`,key:'years of c experience',type:'number',options:[]}));
+  const {page}=await answerMemoryPage(t,{questions,answers:{'years of c experience':2}});
+  assert.equal(await page.locator('#pending-questions .pending-question').count(),3);assert.equal(await page.locator('#pending-questions .answer-row').count(),0);assert.match(await page.locator('#pending-questions').textContent(),/directly in LinkedIn/);
+});
 
 test('browser: common questions save explicit authorization without choosing sponsorship or losing another draft',async t=>{
   const {store,page}=await answerMemoryPage(t);

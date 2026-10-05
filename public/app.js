@@ -7,6 +7,8 @@ const pageCopy={dashboard:['Your application workspace','Find matching jobs and 
 let state=null,ready=false,busy=false,view='dashboard',toastTimer,questionSignature='',answerSignature='',controlId=0,committedCountry='';
 let commonSignature='',recognizedSignature='',smsEmployersSignature='';
 const answerDrafts=new Map();
+const pendingDrafts=new Map();
+let pendingGroupCounts=new Map();
 let recommendationResume=null,recommendationLoading=false,recommendationRequest=0;
 const create=(tag,className,text)=>{const element=document.createElement(tag);if(className)element.className=className;if(text!==undefined)element.textContent=String(text);return element;};
 function setView(next){
@@ -291,7 +293,8 @@ function matchChoice(options,value){
   const text=answerText(value).trim().toLocaleLowerCase(),available=options.filter(option=>option.value!=='');
   const labels=available.filter(option=>option.label.toLocaleLowerCase()===text);return labels.length===1?labels[0].label:undefined;
 }
-function answerEditor(question,draftKey,savedValue=''){
+function answerEditor(question,draftKey,savedValue='',draftAdapter){
+  const drafts=draftAdapter||{get:()=>answerDrafts.get(draftKey),set:value=>answerDrafts.set(draftKey,value),clear:()=>answerDrafts.delete(draftKey)};
   const options=question.type==='checkbox'?[{label:'Yes',value:'yes'},{label:'No',value:'no'}]:question.options;
   const searchable=question.type==='select'&&options?.length?searchableAnswer(`Answer for ${question.label}`,options):null;
   const input=searchable?.input||create(options?.length?'select':'input');
@@ -299,19 +302,20 @@ function answerEditor(question,draftKey,savedValue=''){
     const placeholder=create('option',null,'Choose an answer');placeholder.value='';input.append(placeholder);
     for(const option of options){if(option.value==='')continue;const choice=create('option',null,option.label);choice.value=option.label;input.append(choice);}
   }
-  const initial=answerDrafts.has(draftKey)?answerDrafts.get(draftKey):options?.length?(matchChoice(options,savedValue)||''):answerText(savedValue);
-  input.value=initial;input.addEventListener('input',()=>answerDrafts.set(draftKey,input.value));input.addEventListener('change',()=>answerDrafts.set(draftKey,input.value));
+  const draft=drafts.get(),initial=draft!==undefined?draft:options?.length?(matchChoice(options,savedValue)||''):answerText(savedValue);
+  input.value=initial;input.addEventListener('input',()=>drafts.set(input.value));input.addEventListener('change',()=>drafts.set(input.value));
   const row=create('div',searchable?'answer-row searchable-row':'answer-row'),button=create('button','button primary answer-action','Save this answer');button.type='button';
   button.addEventListener('click',()=>{
     const value=options?.length?matchChoice(options,input.value):input.value.trim();
     if(!value){toast(searchable?'Choose an answer from the list':'Enter an answer first',true);return;}
-    perform(async()=>{await api('/api/answers',{...state.answers,[question.answerKey||question.key]:value});answerDrafts.delete(draftKey);},'Answer saved');
+    const beforeSave=input.value;
+    perform(async()=>{await api('/api/answers',{...state.answers,[question.answerKey||question.key]:value});drafts.clear(beforeSave);},'Answer saved');
   });
   row.append(searchable?.field||inputLabel(`Answer for ${question.label}`,input),button);
   return {row,input,set(value){
     const text=options?.length?matchChoice(options,value):answerText(value);
     if(text===undefined){toast('That answer is not one of the current choices',true);return;}
-    input.value=text;answerDrafts.set(draftKey,text);input.focus();
+    input.value=text;drafts.set(text);input.focus();
   }};
 }
 function appendSuggestions(card,suggestions,editor){
@@ -324,24 +328,67 @@ function appendSuggestions(card,suggestions,editor){
   }
   card.append(group);
 }
-function renderQuestions(){
-  const signature=JSON.stringify(state.questions);if(signature===questionSignature)return;questionSignature=signature;
+function pendingDraft(group){
+  const drafts=pendingDrafts.get(group.draftId)||[];
+  if(pendingGroupCounts.get(group.draftId)===1&&drafts.length===1)return drafts[0];
+  return drafts.find(draft=>draft.targetGroupId===group.id);
+}
+function pendingDraftAdapter(group){
+  return {
+    get:()=>pendingDraft(group)?.value,
+    set(value){
+      let draft=pendingDraft(group);
+      if(!draft){draft={draftId:group.draftId,label:group.question.label,value,targetGroupId:group.id};const drafts=pendingDrafts.get(group.draftId)||[];drafts.push(draft);pendingDrafts.set(group.draftId,drafts);}
+      draft.value=value;
+    },
+    clear(beforeSave){
+      const draft=pendingDraft(group);
+      if(draft&&draft.value===beforeSave){const remaining=pendingDrafts.get(group.draftId).filter(entry=>entry!==draft);if(remaining.length)pendingDrafts.set(group.draftId,remaining);else pendingDrafts.delete(group.draftId);}
+      questionSignature='';
+    }
+  };
+}
+function renderRetainedDrafts(groups){
   const fragment=document.createDocumentFragment();
-  for(const question of state.questions){
+  for(const drafts of pendingDrafts.values())for(const draft of drafts){
+    if(groups.some(group=>group.question.type!=='unsupported'&&pendingDraft(group)===draft))continue;
+    const card=create('article','retained-question-draft');card.append(create('h3',null,draft.label),create('p','retained-value',draft.value),create('p',null,'Your unsaved edit is retained. Review the question before using it.'));
+    for(const group of groups.filter(group=>group.draftId===draft.draftId&&group.question.type!=='unsupported')){
+      const use=create('button','button answer-action',`Use for this question · ${group.question.company||group.question.label}`);use.type='button';
+      use.addEventListener('click',()=>{for(const other of drafts)if(other.targetGroupId===group.id)delete other.targetGroupId;draft.targetGroupId=group.id;questionSignature='';renderQuestions();syncControls();});card.append(use);
+    }
+    fragment.append(card);
+  }
+  const container=byId('retained-question-drafts');container.replaceChildren(fragment);container.hidden=container.childNodes.length===0;
+}
+function renderQuestions(){
+  const groups=state.questionGroups||[],signature=JSON.stringify(groups);if(signature===questionSignature)return;questionSignature=signature;
+  const counts=new Map();for(const group of groups)counts.set(group.draftId,(counts.get(group.draftId)||0)+1);
+  for(const [draftId,count] of counts)if(count>1&&(pendingGroupCounts.get(draftId)||0)<=1)for(const draft of pendingDrafts.get(draftId)||[])delete draft.targetGroupId;
+  pendingGroupCounts=counts;
+  const fragment=document.createDocumentFragment();
+  for(const group of groups){
+    const question=group.question;
     const card=create('article','pending-question');card.append(create('h3',null,question.label));
-    const job=state.history.find(record=>record.job.id===question.jobId)?.job;
-    const context=create('p');if(job){context.append(jobAnchor(job,'question-job'));context.append(document.createTextNode(` · ${question.company||job.company}`));}else context.textContent=question.company?`Question from ${question.company}`:'Question from a LinkedIn application';card.append(context);
-    if(question.reason)card.append(create('p',null,question.reason));
-    const savedValue=question.savedAnswer?(question.savedAnswer.displayAnswer??question.savedAnswer.answer):'';
-    if(question.savedAnswer){
-      const source=question.savedAnswer.source==='profile'?'Profile answer':'Saved answer';
+    card.append(create('p','question-occurrence-count',`${group.occurrences.length} ${group.occurrences.length===1?'occurrence':'occurrences'}`));
+    const saved=group.savedAnswer,savedValue=saved?(saved.displayAnswer??saved.answer):'';
+    if(saved){
+      const source=saved.source==='profile'?'Profile answer':'Saved answer';
       const next=question.type==='unsupported'?'':' LinkedIn entry still needs a retry.';
       card.append(create('p','answer-provenance',`${source}: ${answerText(savedValue)}.${next}`));
     }
-    if(question.type==='unsupported'){card.append(create('p',null,'Complete this control directly in LinkedIn. The app cannot enter it automatically.'));fragment.append(card);continue;}
-    const editor=answerEditor(question,`pending:${question.answerKey||question.key}`,savedValue);appendSuggestions(card,question.suggestions,editor);card.append(editor.row);fragment.append(card);
+    if(question.type==='unsupported')card.append(create('p',null,'Complete this control directly in LinkedIn. The app cannot enter it automatically.'));
+    else{const editor=answerEditor(question,group.draftId,savedValue,pendingDraftAdapter(group));appendSuggestions(card,group.suggestions,editor);card.append(editor.row);}
+    const details=create('details','affected-applications');details.append(create('summary',null,'Affected applications'));
+    for(const occurrence of group.occurrences){
+      const item=create('div','question-occurrence');item.append(jobAnchor({id:occurrence.jobId,title:occurrence.jobTitle||'LinkedIn job'},'question-job'),create('p',null,occurrence.company||'Employer unavailable'),create('p','original-question',occurrence.label));
+      if(occurrence.reason)item.append(create('p',null,occurrence.reason));
+      if(occurrence.blocker)item.append(create('p','question-blocker',occurrence.blocker==='missing_answer'?'Waiting for your answer':'LinkedIn entry needs attention'));
+      details.append(item);
+    }
+    card.append(details);fragment.append(card);
   }
-  byId('pending-questions').replaceChildren(fragment);byId('questions-empty').hidden=state.questions.length>0;
+  byId('pending-questions').replaceChildren(fragment);byId('questions-empty').hidden=groups.length>0;renderRetainedDrafts(groups);
 }
 function renderCommonQuestions(){
   const questions=state.answerMemory?.commonQuestions||[],signature=JSON.stringify(questions);if(signature===commonSignature)return;commonSignature=signature;
@@ -396,7 +443,9 @@ function renderLibrary(){
 function render(){
   const config=state.config,status=state.status,active=['running','stopping'].includes(status.state);
   byId('today-count').textContent=status.todayCount;byId('daily-cap').textContent=`/ ${config.dailyCap}`;byId('daily-progress').max=config.dailyCap;byId('daily-progress').value=status.todayCount;
-  byId('confirmed-count').textContent=status.confirmedToday||0;byId('pending-count').textContent=state.questions.length;byId('question-count').textContent=state.questions.length;byId('question-count').hidden=state.questions.length===0;
+  const counts=state.questionCounts||{distinctQuestions:state.questions.length,affectedApplications:0};
+  byId('confirmed-count').textContent=status.confirmedToday||0;byId('pending-count').textContent=counts.distinctQuestions;byId('question-count').textContent=counts.distinctQuestions;byId('question-count').hidden=counts.distinctQuestions===0;
+  byId('question-summary').textContent=`${counts.distinctQuestions} ${counts.distinctQuestions===1?'question':'questions'} across ${counts.affectedApplications} ${counts.affectedApplications===1?'application':'applications'}`;
   byId('state-badge').className=`state-badge ${status.state}`;
   const names={idle:state.readiness.length?'Setup needed':'Ready',running:'Applying',stopping:'Stopping',paused:'Paused',failed:'Needs attention'};
   byId('state-label').textContent=names[status.state]||'Ready';
