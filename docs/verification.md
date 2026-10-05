@@ -389,7 +389,10 @@ browser check confirmed the five cards, expandable job-specific entry failures,
 saved choices, and the matching controls (off by default; minimum 70).
 No settings, answers, or applications were changed during the live check.
 The `~/Projects/job-applier` link continues to use this primary checkout.
-Phase 1 is complete; Phase 2 requires fresh approval.
+The authorized public GitHub main branch was pushed and its revision matched
+the local checkout. Private data, backups, screenshots, test artifacts, cookies,
+and résumés remain excluded from Git. Phase 1 is complete; Phase 2 requires
+fresh approval.
 
 ## Execution record
 

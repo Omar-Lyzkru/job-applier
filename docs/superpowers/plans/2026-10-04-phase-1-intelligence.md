@@ -63,8 +63,8 @@ concurrent edits to shared domain, server, dashboard, or fixture files.
 - [x] Document how to enable intelligent matching, confirm skills, select families/regions, change minimum score, inspect explanations, and answer grouped cards. Explain that score is a rubric and that legal/consent answers stay explicit.
 - [x] Integrate the verified branch according to existing repository/user authorization. Before restarting production, verify no active run; back up private config/answers/questions/history and compare contents after startup. If active, defer restart rather than interrupt it.
 - [x] Read the updated local bootstrap and inspect the UI without editing real answers or submitting applications. Preserve stored data; report any live compatibility check that remains unverified.
-- [ ] Push the authorized code update only after checks pass. Verify the remote commit matches the local commit and exclude data, backups, screenshots, cookies, and résumé files.
-- [ ] Summarize implemented features, actual files changed, tests/results, limitations, and deferred work. STOP. Do not begin Phase 2, even if Phase 1 exposes the existing radio-entry timeout.
+- [x] Push the authorized code update only after checks pass. Verify the remote commit matches the local commit and exclude data, backups, screenshots, cookies, and résumé files.
+- [x] Summarize implemented features, actual files changed, tests/results, limitations, and deferred work. STOP. Do not begin Phase 2, even if Phase 1 exposes the existing radio-entry timeout.
 
 ## Deferred work
 
