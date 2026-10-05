@@ -566,3 +566,5 @@ test('browser: inspection login interruption carries a typed global blocker',asy
 });
 
 test('browser: missing explicit answers do not become duplicate native-validation blockers',async t=>{const {adapter,options}=await setup(t);const result=await adapter.apply(job,{...options,answers:{}});assert.equal(result.status,'needs_answer');assert.ok(result.pendingQuestions.length);assert.ok(result.blockers.every(b=>b.code==='missing_answer'));});
+
+test('browser: failure diagnostics include measured actions without field labels or values',async t=>{const {adapter,options}=await setup(t,'next-validation',{action:700});const result=await adapter.apply(job,options);assert.ok(result.diagnostic.actions.length>0);assert.ok(result.diagnostic.actions.some(a=>a.kind==='fill'));assert.ok(result.diagnostic.actions.every(a=>Number.isInteger(a.durationMs)&&a.durationMs>=0&&a.durationMs<=60000));assert.doesNotMatch(JSON.stringify(result.diagnostic.actions),/test@example|Test|Applicant|private-test-secret|Resume|first name/i);});

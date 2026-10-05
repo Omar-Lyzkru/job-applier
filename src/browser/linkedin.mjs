@@ -338,7 +338,7 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
         if(page&&!page.isClosed()&&await dialogFor(page).count())try{lastStructure=(await verifyApplicationFields(dialogFor(page),{...options,signal:undefined})).safeStructure;}catch{}
         if(result.status==='needs_answer'&&result.pendingQuestions?.every(q=>q.blocker==='missing_answer')&&lastStructure.validationCategories?.every(c=>c==='valueMissing'))result={...result,blockers:result.blockers?.filter(b=>b.code!=='validation')};
         let final=await finish(page,{...result,...(applicationState.answerMatches?.length?{answerMatches:applicationState.answerMatches}:{})});
-        if(final.blockers?.length)final.diagnostic=buildDiagnostic({...lastStructure,phase,pageIndex,timestamp:new Date().toISOString(),code:final.blockers[0].code,transition:final.transition||'unchanged',cleanup:final.cleanup.requiredManual?'not_needed':final.cleanup.confirmed?'closed':'failed'});
+        if(final.blockers?.length)final.diagnostic=buildDiagnostic({...lastStructure,phase,pageIndex,timestamp:new Date().toISOString(),code:final.blockers[0].code,transition:final.transition||'unchanged',actions:applicationState.actions||[],cleanup:final.cleanup.requiredManual?'not_needed':final.cleanup.confirmed?'closed':'failed'});
         return final;
       };
       const failed=(code,reason,extra={})=>complete({status:protectedAttempt?'unconfirmed':blockerPolicy(code).scope==='global'?'paused':'failed',reason:reason||makeBlocker(code).summary,blockers:[makeBlocker(code,{phase}),...extra.blockers||[]],...extra});

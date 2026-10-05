@@ -185,7 +185,7 @@ assert.equal(result.blockers[0].code,'form_changed'); // nonconverging fixture
 - Keep one Submit click and current explicit confirmation strings. Collect sanitized diagnostic structure before cleanup; return original blockers and separate cleanup evidence. `onProgress` rejection is a storage blocker and prohibits further application actions.
 - Recognize page identity from progress/headings/control schema and DOM generation. Busy/status/error text changes alone are not new pages. Safe Next retry maximum is one; page cap 15; all waits are cancellable/bounded.
 
-- [ ] **Step 1: Add failing adapter scenarios `identical-text-next`, `ignored-next-once`, `ignored-next-always`, `next-validation`, `next-busy`, form change during guard, résumé change during guard, cleanup failure after a local blocker, and failure to persist progress.** Add `fixture.state.advances` separate from existing `events`, and optional `beforeAdvance` gate awaited by `/events`; always release gates in teardown. Assert exactly two ignored-step clicks when one retry is safe, one click for validation, zero guard/Submit on unresolved changes, prompt Stop, typed global challenge/limit/browser failures, original plus cleanup blockers, and absence of planted secrets in returned diagnostics.
+- [x] **Step 1: Add failing adapter scenarios `identical-text-next`, `ignored-next-once`, `ignored-next-always`, `next-validation`, `next-busy`, form change during guard, résumé change during guard, cleanup failure after a local blocker, and failure to persist progress.** Add `fixture.state.advances` separate from existing `events`, and optional `beforeAdvance` gate awaited by `/events`; always release gates in teardown. Assert exactly two ignored-step clicks when one retry is safe, one click for validation, zero guard/Submit on unresolved changes, prompt Stop, typed global challenge/limit/browser failures, original plus cleanup blockers, and absence of planted secrets in returned diagnostics.
 
 ```js
 assert.deepEqual(fixture.state.events,['guard','submit']);
@@ -196,10 +196,10 @@ assert.equal(result.cleanup.blocker.code,'cleanup_failed');
 assert.equal(fixture.state.submissions.length,0);
 ```
 
-- [ ] **Step 2: Run `PLAYWRIGHT_BROWSERS_PATH="$PWD/data/browsers" node --test --test-isolation=none test/adapter.test.mjs test/forms.test.mjs test/session.test.mjs`.** Expected: new transition/cleanup/readiness tests fail; inspect their exact reason and fixture event order.
-- [ ] **Step 3: Implement the adapter contract and typed interruption paths.** Distinguish validation from progress, safely observe identical-text DOM replacement, await progress persistence, revalidate before the guard and again before the single click. A reserved/clicked failure remains uncertain; challenges/limits/unsafe cleanup remain global. Preserve original questions/reasons through cleanup and capture only Task 4 safe structure. Native browser ownership/login behavior remains unchanged.
-- [ ] **Step 4: Run Step 2's command, then `npm test`.** Expected: all pass. Confirmation timeout, dry run, limits, interruption and profile ownership regressions retain their protection.
-- [ ] **Step 5: Commit this task.** Message: `fix: verify application transitions and return scoped blockers`. Complete the Native task using Step 2's command.
+- [x] **Step 2: Run `PLAYWRIGHT_BROWSERS_PATH="$PWD/data/browsers" node --test --test-isolation=none test/adapter.test.mjs test/forms.test.mjs test/session.test.mjs`.** Expected: new transition/cleanup/readiness tests fail; inspect their exact reason and fixture event order.
+- [x] **Step 3: Implement the adapter contract and typed interruption paths.** Distinguish validation from progress, safely observe identical-text DOM replacement, await progress persistence, revalidate before the guard and again before the single click. A reserved/clicked failure remains uncertain; challenges/limits/unsafe cleanup remain global. Preserve original questions/reasons through cleanup and capture only Task 4 safe structure. Native browser ownership/login behavior remains unchanged.
+- [x] **Step 4: Run Step 2's command, then `npm test`.** Expected: all pass. Confirmation timeout, dry run, limits, interruption and profile ownership regressions retain their protection.
+- [x] **Step 5: Commit this task.** Message: `fix: verify application transitions and return scoped blockers`. Complete the Native task using Step 2's command.
 
 ### Task 6: Persistent runner scheduling and targeted retries
 

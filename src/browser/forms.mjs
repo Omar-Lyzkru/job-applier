@@ -256,9 +256,11 @@ export async function fillApplicationFields(dialog,options){
  const {signal,applicationState={},resumePath,uploadTimeout=10000,actionTimeout=10000,quietMs=300,maxPasses=8,onAction}=options;options={...options,applicationState};
  const end=Date.now()+actionTimeout,failures=new Map();let uploadError=null;
  const remaining=()=>Math.max(1,end-Date.now());
+ const trace=(kind,retries,start)=>{applicationState.actions ||= [];if(applicationState.actions.length<100)applicationState.actions.push({kind,retries,durationMs:Math.min(60000,Math.max(0,Date.now()-start))});};
  for(const entry of (await discoverFields(dialog)).filter(e=>e.field.type==='file'&&/resume|résumé|\bcv\b/i.test(e.field.label))){
-  try{if(!applicationState.resumeVerified)await uploadResume(dialog,entry,{resumePath,signal,applicationState,uploadTimeout:Math.min(uploadTimeout,remaining())});}
-  catch(error){checkStopped(signal);uploadError=`Résumé: ${error.message.split('\n')[0]}`;}
+  const start=Date.now(),needed=!applicationState.resumeVerified;
+  try{if(needed)await uploadResume(dialog,entry,{resumePath,signal,applicationState,uploadTimeout:Math.min(uploadTimeout,remaining())});}
+  catch(error){checkStopped(signal);uploadError=`Résumé: ${error.message.split('\n')[0]}`;}finally{if(needed)trace('upload',0,start);}
  }
  for(let pass=0;pass<maxPasses&&Date.now()<end;pass++){
   checkStopped(signal);let acted=false;const scanned=await discoverFields(dialog);
@@ -270,7 +272,7 @@ export async function fillApplicationFields(dialog,options){
    if(failures.has(fingerprint))continue;
    for(let retry=0;retry<2;retry++){
     checkStopped(signal);if(Date.now()>=end)break;fresh=(await discoverFields(dialog)).filter(e=>fieldIdentity(e.field)===fingerprint);if(fresh.length!==1)break;entry=fresh[0];answer=desired(entry,options);if(!answer||retained(entry,answer))break;
-    await onAction?.({operation:entry.field.type,controlFingerprint:fingerprint,retry});checkStopped(signal);
+    await onAction?.({operation:entry.field.type,controlFingerprint:fingerprint,retry});checkStopped(signal);const actionStart=Date.now();
     try{
      if(entry.readOnly)throw new Error('Read-only value differs from your saved answer');
      if(entry.field.type==='checkbox')await setNativeChecked(dialog,entry.locator,answer.value,signal,remaining());
@@ -278,7 +280,7 @@ export async function fillApplicationFields(dialog,options){
      else if(entry.field.type==='select')await entry.locator.selectOption({label:answer.optionLabel},{timeout:remaining()});
      else await entry.locator.fill(answer.value,{timeout:remaining()});
      acted=true;
-    }catch(error){checkStopped(signal);if(retry===1)failures.set(fingerprint,makeBlocker(error.name==='TimeoutError'?'entry_timeout':'entry_verification',{phase:'form',controlFingerprint:fingerprint}));}
+    }catch(error){checkStopped(signal);if(retry===1)failures.set(fingerprint,makeBlocker(error.name==='TimeoutError'?'entry_timeout':'entry_verification',{phase:'form',controlFingerprint:fingerprint}));}finally{trace(['radio','checkbox'].includes(entry.field.type)?'check':entry.field.type==='select'?'select':'fill',retry,actionStart);}
     const after=(await discoverFields(dialog)).filter(e=>fieldIdentity(e.field)===fingerprint);
     if(after.length===1&&retained(after[0],answer)){
      failures.delete(fingerprint);
