@@ -135,7 +135,7 @@ assert.equal((await recovered.getQuestions())[0].label,'Relocate?');
 - Produce `saveFailureSnapshot(dataDir,recordId,diagnostic) -> {available,reference?}` and `readFailureSnapshot(dataDir,recordId) -> SanitizedDiagnostic|null`. Only known UUID paths under `data/failures` are used; UI never supplies a path. Serializer limit is 65,536 bytes and retention 100 snapshot directories. Failures return unavailable without changing application truth.
 - Tasks 5–7 consume this contract; no form discovery imports or cycles in the snapshot module.
 
-- [ ] **Step 1: Add failing tests for strict allowlisting, malicious strings/paths, files/permissions, size, retention, corrupted/missing snapshots and write errors.** Plant answers, emails, passwords, cookies, employer HTML, validation echoes, résumé filenames/paths and exception text in input fields. Assert none occur in serialized JSON. Assert UUID path rejection, oversized snapshots unavailable, a 101st directory prunes to 100, chmod modes 0600/0700, and pruning leaves independent history/answers untouched. Symlinked snapshot directories/files are neither followed nor pruned; reads/writes report unavailable.
+- [x] **Step 1: Add failing tests for strict allowlisting, malicious strings/paths, files/permissions, size, retention, corrupted/missing snapshots and write errors.** Plant answers, emails, passwords, cookies, employer HTML, validation echoes, résumé filenames/paths and exception text in input fields. Assert none occur in serialized JSON. Assert UUID path rejection, oversized snapshots unavailable, a 101st directory prunes to 100, chmod modes 0600/0700, and pruning leaves independent history/answers untouched. Symlinked snapshot directories/files are neither followed nor pruned; reads/writes report unavailable.
 
 ```js
 assert.equal(JSON.stringify(buildDiagnostic(inputWithSecrets)).includes('private-test-secret'),false);
@@ -144,10 +144,10 @@ assert.ok(Buffer.byteLength(JSON.stringify(snapshot),'utf8')<=65536);
 assert.equal(snapshotDirectories.length,100);
 ```
 
-- [ ] **Step 2: Run `node --test --test-isolation=none test/failure-snapshots.test.mjs`.** Expected: new snapshot behavior fails because the contracts are absent, then exposes any unsafe/incorrect implementation.
-- [ ] **Step 3: Implement the declared snapshot contracts.** Allowlist values/categories, bound collection lengths, reject free-text unknown fields, write privately and prune only valid owned snapshot directories. No screenshots or raw HTML/text. Optional diagnostic failure does not replace the original blocker or prevent browser cleanup; core durable-history failure still pauses work.
-- [ ] **Step 4: Run Step 2's command, then `npm test`.** Expected: all tests pass; no secret appears in snapshots or test output.
-- [ ] **Step 5: Commit this task.** Message: `feat: add bounded sanitized failure snapshots`. Complete the Native task using Step 2's command.
+- [x] **Step 2: Run `node --test --test-isolation=none test/failure-snapshots.test.mjs`.** Expected: new snapshot behavior fails because the contracts are absent, then exposes any unsafe/incorrect implementation.
+- [x] **Step 3: Implement the declared snapshot contracts.** Allowlist values/categories, bound collection lengths, reject free-text unknown fields, write privately and prune only valid owned snapshot directories. No screenshots or raw HTML/text. Optional diagnostic failure does not replace the original blocker or prevent browser cleanup; core durable-history failure still pauses work.
+- [x] **Step 4: Run Step 2's command, then `npm test`.** Expected: all tests pass; no secret appears in snapshots or test output.
+- [x] **Step 5: Commit this task.** Message: `feat: add bounded sanitized failure snapshots`. Complete the Native task using Step 2's command.
 
 ### Task 4: Semantic native-control reacquisition and form convergence
 
