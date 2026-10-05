@@ -376,7 +376,20 @@ Rulings retained from the review:
   remain outdated; startup, stored-data comparison, and remote revision checks
   are required before delivery is reported.
 
-Deferred minors: none. Local delivery results are appended after verification.
+Deferred minors: none.
+
+Delivery: the tested branch was fast-forwarded into the clean primary `main`
+checkout. Its unit/API suite passed **140/140** again. With the local server
+stopped and no pending submissions, config, answers, questions, and history
+were backed up privately and verified byte-for-byte unchanged after startup.
+The updated bootstrap retains all 19 saved answers and 54 stored occurrences;
+35 visible occurrences form **5 compatible cards across 13 applications**.
+All visible occurrences retain saved values and usable job context. A read-only
+browser check confirmed the five cards, expandable job-specific entry failures,
+saved choices, and the matching controls (off by default; minimum 70).
+No settings, answers, or applications were changed during the live check.
+The `~/Projects/job-applier` link continues to use this primary checkout.
+Phase 1 is complete; Phase 2 requires fresh approval.
 
 ## Execution record
 
