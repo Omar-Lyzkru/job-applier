@@ -35,3 +35,10 @@ test('saved false and zero remain explicit and duplicate suggestions coalesce by
   const result=groups([question({savedAnswer,suggestions:[suggestion]}),question({jobId:'1002',savedAnswer,suggestions:[suggestion,{...suggestion,reason:'Different review'}]})]);
   assert.equal(result[0].savedAnswer.answer,false);assert.equal(result[0].suggestions.length,2);assert.equal(result[0].suggestions[0].answer,0);
 });
+
+test('screening explanation metadata cannot change compatible question draft identity',()=>{
+ const input=question({label:'Total years of experience',key:'total years of experience',answerKey:'total years of experience',type:'number',options:[]});
+ const a=groups([input])[0],b=groups([{...input,screeningExplanation:{impact:'high',decision:'confirmation_required',summary:'Changed explanation',sourceQuestion:'Another source'},reason:'Changed reason',jobId:'1002'}])[0];
+ assert.equal(a.draftId,b.draftId);assert.equal(a.occurrences.length,b.occurrences.length);
+ assert.notEqual(a.draftId,groups([{...input,type:'text',pattern:'[0-9]+'}])[0].draftId);
+});

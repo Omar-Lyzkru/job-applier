@@ -403,6 +403,17 @@ function renderRetainedDrafts(groups){
   }
   const container=byId('retained-question-drafts');container.replaceChildren(fragment);container.hidden=container.childNodes.length===0;
 }
+function appendScreeningExplanation(card,question){
+  const explanation=question.screeningExplanation;if(!explanation)return;
+  card.append(create('p','screening-meaning',explanation.qualifierSummary),create('p','screening-resolution',explanation.summary));
+  const details=create('details','screening-details');details.append(create('summary',null,'Why this answer'));
+  if(explanation.sourceQuestion)details.append(create('p',null,`Saved from: ${explanation.sourceQuestion}`));
+  if(question.resolutionReason)details.append(create('p',null,question.resolutionReason));
+  if(question.reason&&question.reason!==question.resolutionReason)details.append(create('p',null,`Entry issue: ${question.reason}`));
+  if(explanation.impact==='high')details.append(create('p',null,'Review the exact wording carefully. No answer is inferred.'));
+  card.append(details);
+}
+
 function renderQuestions(){
   const groups=state.questionGroups||[],signature=JSON.stringify(groups);if(signature===questionSignature)return;questionSignature=signature;
   const counts=new Map();for(const group of groups)counts.set(group.draftId,(counts.get(group.draftId)||0)+1);
@@ -412,6 +423,7 @@ function renderQuestions(){
   for(const group of groups){
     const question=group.question;
     const card=create('article','pending-question');card.append(create('h3',null,question.label));
+    appendScreeningExplanation(card,question);
     card.append(create('p','question-occurrence-count',`${group.occurrences.length} ${group.occurrences.length===1?'occurrence':'occurrences'}`));
     const saved=group.savedAnswer,savedValue=saved?(saved.displayAnswer??saved.answer):'';
     if(saved){
@@ -438,6 +450,7 @@ function renderCommonQuestions(){
   for(const question of questions){
     const card=create('article','common-question'),heading=create('h3',null,question.label);card.append(heading);
     if(question.help)card.append(create('p','answer-memory-help',question.help));
+    appendScreeningExplanation(card,question);
     if(question.status==='saved'){
       const source=create('p','answer-provenance','Saved from: ');source.append(create('span',null,question.sourceQuestion||question.label));card.append(source);
     }else card.append(create('p','answer-memory-help',question.status==='review'?'Review previous answers before choosing.':'No answer saved. Choose your own answer.'));

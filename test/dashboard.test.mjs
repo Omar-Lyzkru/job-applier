@@ -722,3 +722,23 @@ test('browser: attention shows last update and guarded sanitized diagnostics on 
  assert.equal((await card.locator('pre').textContent()).includes('PLANTED SECRET'),false);
  await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/attention-diagnostics-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve('test-artifacts/attention-diagnostics-mobile.png'),fullPage:true});
 });
+
+test('browser: screening explanation shows safe sources and preserves drafts through polling',async t=>{
+ const legal={key:'do you currently require sponsorship to work in the us',label:'Do you currently require sponsorship to work in the US?',type:'radio',required:true,options:[{label:'Yes',value:'on'},{label:'No',value:'on'}],jobId:'1001',company:'Example',blocker:'operational',reason:'Selection needs verification'};
+ const years={key:'total years of experience',label:'Total years of experience',type:'number',required:true,options:[],jobId:'1001',blocker:'operational',reason:'Number needs verification'};
+ const other={key:'why this company',label:'Why this company?',type:'text',required:true,options:[],jobId:'1002',blocker:'operational',reason:'<img src=x onerror="window.injected=true">'};
+ const answers={'do you currently require sponsorship to work in the united states':false,'total years of experience':0,'why this company':'Original'};
+ const {page,store}=await answerMemoryPage(t,{answers,questions:[legal,years,other]});const starts=[];page.on('request',r=>{if(/\/api\/(?:start|retry)$/.test(new URL(r.url()).pathname))starts.push(r.url());});
+ const card=page.locator('.pending-question').filter({has:page.getByRole('heading',{name:legal.label,exact:true})});
+ await card.locator('.screening-resolution').waitFor();assert.match(await card.locator('.screening-meaning').textContent(),/now.*future/i);assert.match(await card.locator('.screening-resolution').textContent(),/saved answer.*reviewed meaning/i);
+ assert.equal(await card.getByLabel(`Answer for ${legal.label}`,{exact:true}).inputValue(),'No');
+ await card.locator('.screening-details summary').focus();await page.keyboard.press('Enter');assert.equal(await card.locator('.screening-details').evaluate(el=>el.open),true);assert.match(await card.locator('.screening-details').textContent(),/do you currently require sponsorship to work in the united states/);
+ const yearInput=page.getByLabel(`Answer for ${years.label}`,{exact:true});assert.equal(await yearInput.inputValue(),'0');await yearInput.fill('7');
+ const draft=page.getByLabel(`Answer for ${other.label}`,{exact:true});await draft.fill('Retained edit');
+ let refreshed=waitBootstrap(page);await store.saveAnswers({...answers,'total years of experience':1});await refreshed;
+ await page.getByText('Saved answer: 1. LinkedIn entry still needs a retry.',{exact:true}).waitFor();assert.equal(await yearInput.inputValue(),'7');assert.equal(await draft.inputValue(),'Retained edit');
+ refreshed=waitBootstrap(page);await store.saveQuestions([legal,years,{...other,reason:'Changed explanation context'}]);await refreshed;await page.getByText('Changed explanation context',{exact:true}).waitFor({state:'attached'});assert.equal(await draft.inputValue(),'Retained edit');
+ const otherCard=page.locator('.pending-question').filter({has:page.getByRole('heading',{name:other.label,exact:true})});await draft.fill('x'.repeat(10001));await otherCard.getByRole('button',{name:'Save this answer',exact:true}).click();await page.getByText('Answer is too long',{exact:true}).waitFor();assert.equal(await draft.inputValue(),'x'.repeat(10001));assert.equal((await store.getAnswers())['why this company'],'Original');
+ assert.equal(await page.locator('#pending-questions img').count(),0);assert.equal(await page.evaluate(()=>window.injected),undefined);assert.deepEqual(starts,[]);assert.deepEqual(await store.getHistory(),[]);
+ await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/screening-explanations-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve('test-artifacts/screening-explanations-mobile.png'),fullPage:true});
+});

@@ -462,3 +462,26 @@ test('rediscovered uncertain work remains counted and guarded beyond displayed h
  const {store,app,send}=await setup(t,{retry:true}),uncertain=await store.createRecord(attentionJob(9900),'unconfirmed');await store.updateRecord(uncertain.id,{attemptedAt:new Date().toISOString()});await store.createRecord(attentionJob(9900),'skipped');
  for(let i=0;i<201;i++)await store.createRecord(attentionJob(10000+i),'skipped');const data=await (await fetch(app.url+'/api/bootstrap')).json();assert.equal(data.history.some(r=>r.id===uncertain.id),false);assert.equal(data.attentionCounts.unconfirmed,1);assert.equal(data.attention[0].recordId,uncertain.id);assert.equal((await send('/api/retry',{recordIds:[uncertain.id]})).status,409);
 });
+
+test('screening explanations reflect actual resolution without changing durable applicant data',async t=>{
+ const {store,app,commands}=await setup(t,{retry:true});
+ const choices=[{label:'Yes',value:'y'},{label:'No',value:'n'}];
+ const questions=[
+  {key:'do you currently require sponsorship to work in the us',label:'Do you currently require sponsorship to work in the US?',type:'radio',options:choices,jobId:'1001',company:'Example',blocker:'operational'},
+  {key:'total years of experience',label:'Total years of experience',type:'number',jobId:'1001',blocker:'operational'},
+  {key:'i consent',label:'I consent',type:'checkbox',required:true,jobId:'1001',blocker:'operational'},
+  {key:'expected graduation',label:'Expected graduation',type:'date',jobId:'1001',blocker:'operational'},
+  {key:'do you consent to receive text message updates about your application',label:'Do you consent to receive text message updates about your application?',type:'radio',options:choices,jobId:'1002',blocker:'missing_answer'},
+  {key:'custom question',label:'<img src=x onerror="window.injected=true">',type:'unsupported',jobId:'1002',blocker:'operational'}
+ ];
+ await store.saveAnswers({'do you currently require sponsorship to work in the united states':false,'total years of experience':0,'i consent':false,'expected graduation':'Spring 2028'});await store.saveQuestions(questions);
+ const before=await Promise.all([store.getConfig(),store.getAnswers(),store.getQuestions(),store.getHistory()]);
+ const data=await (await fetch(app.url+'/api/bootstrap')).json(),q=data.questions;
+ assert.equal(q[0].screeningExplanation.decision,'compatible');assert.equal(q[0].screeningExplanation.impact,'high');assert.equal(q[0].savedAnswer.displayAnswer,'No');assert.equal(q[0].screeningExplanation.sourceQuestion,'do you currently require sponsorship to work in the united states');
+ assert.equal(q[1].screeningExplanation.decision,'compatible');assert.equal(q[1].savedAnswer.answer,0);
+ assert.equal(q[2].screeningExplanation.decision,'manual_only');assert.equal(q[2].savedAnswer.answer,false);
+ assert.equal(q[3].screeningExplanation.decision,'confirmation_required');assert.match(q[3].resolutionReason,/format/i);
+ assert.equal(q[4].screeningExplanation.reasonCode,'employer_unknown');assert.equal(q[5].screeningExplanation.reasonCode,'unsupported_control');
+ const common=data.answerMemory.commonQuestions.find(q=>q.key==='degree type');assert.equal(common.description.screening.qualifiers.educationStatus,'current');assert.equal(common.screeningExplanation.decision,'confirmation_required');
+ assert.deepEqual(await Promise.all([store.getConfig(),store.getAnswers(),store.getQuestions(),store.getHistory()]),before);assert.deepEqual(commands,[]);
+});

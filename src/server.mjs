@@ -8,6 +8,7 @@ import {createRunner} from './runner.mjs';
 import {createLinkedInAdapter} from './browser/linkedin.mjs';
 import {MAX_RESUME_BYTES,readiness,dayKey,countsTowardCap,resolveAnswer} from './domain.mjs';
 import {commonQuestions,savedAnswerKey,normalizeQuestion,describeQuestion} from './answer-memory.mjs';
+import {explainScreeningResolution} from './screening-intelligence.mjs';
 import {groupPendingQuestions} from './question-groups.mjs';
 import {analyzeResume} from './resume-analysis.mjs';
 import {roleFamilyPresets} from './search-profiles.mjs';
@@ -85,6 +86,8 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
           question.answerKey=savedAnswerKey(question);
           question.description=describeQuestion(question);
           const resolution=resolveAnswer(question,config.profile,answers);
+          question.screeningExplanation=explainScreeningResolution(question,resolution);
+          question.resolutionReason=resolution.reason||'';
           question.suggestions=resolution.suggestions||[];
           if(resolution.kind==='fill')question.savedAnswer={answer:resolution.answer,displayAnswer:resolution.optionLabel??resolution.value,sourceQuestion:resolution.sourceQuestion,match:resolution.match,source:resolution.source};
           if(resolution.manual){question.type='unsupported';question.blocker='operational';question.reason=resolution.reason;}
@@ -105,7 +108,7 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
         }));
         const prepared=commonQuestions.map(question=>{
           const resolution=resolveAnswer(question,config.profile,answers);
-          return {...question,status:resolution.kind==='fill'?'saved':resolution.suggestions?.length?'review':'unanswered',
+          return {...question,description:describeQuestion(question),screeningExplanation:explainScreeningResolution(question,resolution),resolutionReason:resolution.reason||'',status:resolution.kind==='fill'?'saved':resolution.suggestions?.length?'review':'unanswered',
             ...(resolution.kind==='fill'?{answer:resolution.answer,sourceQuestion:resolution.sourceQuestion}:{}),suggestions:resolution.suggestions||[]};
         });
         const uniqueReuse=new Map(reusedAnswers.map(match=>[`${match.company}:${match.label}`,match]));
