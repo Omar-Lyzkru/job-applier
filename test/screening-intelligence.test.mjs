@@ -41,3 +41,17 @@ test('screening descriptor explains sensitive and contextual unknowns without au
  assert.equal(describeScreening({label:'Current degree'}).impact,'medium');
  assert.equal(describeScreening({label:'School'}).impact,'low');
 });
+
+test('screening explanations distinguish high impact from incompatible or manual answers',async()=>{
+ const {explainScreeningResolution}=await import('../src/screening-intelligence.mjs');
+ const {resolveAnswer}=await import('../src/domain.mjs');
+ const field={label:'Do you currently require sponsorship to work in the US?',type:'radio',options:[{label:'Yes',value:'yes'},{label:'No',value:'no'}]};
+ const answers={'do you currently require sponsorship to work in the united states':false},r=resolveAnswer(field,{},answers),e=explainScreeningResolution(field,r);
+ assert.equal(e.impact,'high');assert.equal(e.decision,'compatible');assert.equal(e.sourceQuestion,Object.keys(answers)[0]);assert.equal(e.reasonCode,'saved_equivalent');
+ const noAnswer=explainScreeningResolution(field,resolveAnswer(field,{student:true,skills:['Python']},{}));assert.equal(noAnswer.decision,'confirmation_required');
+ const contact={label:'Email',type:'text'};assert.equal(explainScreeningResolution(contact,resolveAnswer(contact,{email:'test@example.com'},{})).reasonCode,'profile_contact');
+ for(const f of [{label:'Years of C++ experience',type:'number'},{label:'Do you consent to receive text message updates about your application?',type:'radio',options:field.options},{label:'Background check',type:'unsupported'}])assert.equal(explainScreeningResolution(f,resolveAnswer(f,{},{})).decision,'manual_only');
+ const checkbox={label:'I consent',type:'checkbox',required:true};assert.equal(explainScreeningResolution(checkbox,resolveAnswer(checkbox,{},{'i consent':false})).decision,'manual_only');
+ const changed={...field,options:[{label:'Not applicable',value:'na'}]};assert.equal(explainScreeningResolution(changed,resolveAnswer(changed,{},answers)).decision,'confirmation_required');
+ const date={label:'Expected graduation',type:'date'};assert.equal(explainScreeningResolution(date,resolveAnswer(date,{},{'expected graduation':'Spring 2028'})).decision,'confirmation_required');
+});

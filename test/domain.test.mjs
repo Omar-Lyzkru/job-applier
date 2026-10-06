@@ -376,3 +376,25 @@ test('common questions never supply answers before the applicant saves one',asyn
   assert.ok(authorization);
   assert.equal(resolveAnswer(authorization,{}, {[authorization.key]:'No'}).value,'No');
 });
+
+test('screening meanings safely reuse newly supported education and overall experience answers',()=>{
+ for(const [label,key,value] of [['How many total years of experience do you have?','total years of experience',0],['How many years of professional experience do you have?','years of professional experience','1.5'],['What degree are you currently studying for?','degree type',"Bachelor's Degree"],['What is your highest completed degree?','highest degree earned','High School'],['Are you presently enrolled as a student?','are you currently a student',false]]){
+  const field={label,type:label.includes('years')?'number':label.includes('student')?'radio':'text',options:[{label:'Yes',value:'yes'},{label:'No',value:'no'}]};const r=resolveAnswer(field,{},{[key]:value});assert.equal(r.kind,'fill',label);assert.equal(r.sourceQuestion,key,label);assert.equal(r.optionLabel??r.value,value===false?'No':String(value));
+ }
+ const f={label:'How many total years of experience do you have?',type:'number'};
+ assert.equal(resolveAnswer(f,{},{'how many total years of experience do you have':0,'total years of experience':2}).value,'0');
+ assert.equal(resolveAnswer({...f,label:'Total years of experience'},{},{'how many total years of experience do you have':0,'total years of experience':2}).value,'2');
+ for(const value of [false,true,-1,'two','0–1 years'])assert.equal(resolveAnswer(f,{},{'total years of experience':value}).kind,'missing');
+ for(const label of ['Years of professional experience','Years of Python experience','Years of paid experience','Years of recent experience','Years of experience'])assert.equal(resolveAnswer({...f,label},{},{'total years of experience':2}).kind,'missing',label);
+ assert.equal(resolveAnswer({label:'What is your highest completed degree?',type:'text'},{},{'degree type':"Bachelor's Degree"}).kind,'missing');
+});
+test('screening sponsorship periods never derive from one another and boolean conflicts stay scoped',()=>{
+ const labels=['Do you currently require sponsorship to work in the United States?','Will you require sponsorship to work in the United States in the future?','Will you now or in the future require sponsorship to work in the United States?'];
+ for(let i=0;i<labels.length;i++)for(let j=0;j<labels.length;j++)if(i!==j){const f={label:labels[i],type:'radio',options:[{label:'Yes',value:'yes'},{label:'No',value:'no'}]};assert.equal(resolveAnswer(f,{},{[normalizeQuestion(labels[j])]:false}).kind,'missing');}
+ const now={label:'Do you currently require sponsorship to work in the US?',type:'radio',options:[{label:'Yes',value:'same'},{label:'No',value:'same'}]};
+ const bank={'do you currently require sponsorship to work in the united states':false,'do you currently need visa sponsorship for employment in the united states':'No'};
+ assert.equal(resolveAnswer(now,{},bank).optionLabel,'No');bank['do you currently need visa sponsorship for employment in the united states']=true;assert.equal(resolveAnswer(now,{},bank).kind,'missing');
+ for(const label of ['If hired, do you currently require sponsorship to work in the US?','Do you currently require sponsorship to work in Canada?','Are you a US citizen?'])assert.equal(resolveAnswer({...now,label},{},bank).kind,'missing');
+ assert.equal(resolveAnswer({label:labels[2],type:'text'},{},{[normalizeQuestion(labels[0])]:false,[normalizeQuestion(labels[1])]:false}).kind,'missing');
+ assert.equal(describeQuestion(now).screening.qualifiers.timeScope,'now');
+});

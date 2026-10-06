@@ -85,3 +85,17 @@ export function describeScreening(field){
  if(!summary)summary=/\b(?:salary|pay|compensation)\b/.test(key)?'Salary needs explicit currency, pay period and amount or range confirmation.':/\bconsent\b/.test(key)?'Confirm the employer, purpose and terms of this consent question.':/\b(?:relocat\w*|located|location)\b/.test(key)?'Willingness, current location and eligibility are separate facts. Confirm this exact question.':'This wording has no reviewed equivalent. Use an explicit answer to this exact question.';
  return {version:1,intent,concept:intent?.startsWith('skill-years:')||intent?.startsWith('experience-years:')?'experience':intent,qualifiers,matchPolicy,impact,reasonCode:years?.ambiguous?'ambiguous_legacy_identity':employerUnknown?'employer_unknown':intent?'known_meaning':'unrecognized_meaning',summary};
 }
+
+// Descriptive only: the domain resolver and browser verifier retain authority.
+export function explainScreeningResolution(field,resolution){
+ const d=describeScreening(field),sourceQuestion=resolution.sourceQuestion??null;
+ let decision='confirmation_required',reasonCode='explicit_answer_needed',summary='Save an explicit answer to this question before retrying.';
+ if(d.matchPolicy==='manual_only'||field.type==='unsupported'||resolution.manual||(field.type==='checkbox'&&field.required&&resolution.kind==='fill'&&resolution.value===false)){
+  decision='manual_only';reasonCode=d.reasonCode==='ambiguous_legacy_identity'||d.reasonCode==='employer_unknown'?d.reasonCode:'unsupported_control';
+  summary=reasonCode==='ambiguous_legacy_identity'?'Old C-family answer keys can overlap. Confirm this experience directly in LinkedIn.':reasonCode==='employer_unknown'?'The employer is unknown. Complete this consent question directly in LinkedIn.':'Complete this control directly in LinkedIn; a saved answer does not make automatic entry safe.';
+ }else if(resolution.kind==='fill'){
+  decision='compatible';reasonCode=resolution.match==='profile'?'profile_contact':resolution.match==='equivalent'?'saved_equivalent':'saved_exact';
+  summary=reasonCode==='profile_contact'?'Your explicit contact profile supplies this answer.':reasonCode==='saved_equivalent'?'An explicit saved answer matches this reviewed meaning.':'An explicit answer is saved for this exact question.';
+ }else if(resolution.suggestions?.length){reasonCode='saved_answer_needs_review';summary='Review the previous answer and this question’s wording, choices and format before saving.';}
+ return {version:1,impact:d.impact,decision,reasonCode,summary,qualifierSummary:d.summary,sourceQuestion};
+}

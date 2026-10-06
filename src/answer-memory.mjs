@@ -18,44 +18,16 @@ export const commonQuestions=[
     help:'This asks about both now and the future, including after graduation. It is separate from work authorization.'}
 ];
 
-const groups=[
-  ['school',['school','school name','university','university name','college or university','college university','name of your university','name of your current university','what is your university name','which university are you currently attending']],
-  ['previous-school',['university previously attended','previous university','which university did you previously attend']],
-  ['graduated-school',['which university did you graduate from','university you graduated from','school you graduated from']],
-  ['degree',['degree','degree type','current degree','current degree type','what degree are you pursuing']],
-  ['completed-degree',['highest completed degree','highest degree earned','highest degree completed','highest educational qualification completed']],
-  ['major',['major','field of study','current field of study','academic major','your major','what is your major','what is your major or field of study']],
-  ['current-student',['are you currently a student','are you a current student','are you presently a student']],
-  ['graduation',['expected graduation','expected graduation date','anticipated graduation','anticipated graduation date','when do you expect to graduate','what is your expected graduation date']],
-  ['position',['desired position type','type of position desired','preferred position type']],
-  ['location',['location preference','preferred job location','preferred work location']],
-  ['department',['department preference','preferred department']],
-  ['address',['street address','address','address line 1']]
-];
-const knownIntents=new Map(groups.flatMap(([intent,labels])=>labels.map(label=>[label,intent])));
-const yearSkills=new Set(['java','javascript','typescript','python','rust','react','node.js','sql','postgresql','git']);
-function skillYears(label){
-  let text=String(label).normalize('NFKC').toLowerCase().replace(/[\u200b-\u200d\ufeff]/g,'').trim().replace(/[?*.!\s]+$/g,'').replace(/\s+/g,' ');
-  const professional=/^(?:years of|how many years of) professional /.test(text);
-  if(professional)text=text.replace(/^(years of|how many years of) professional /,'$1 ');
-  const total=/^(?:total )?years of (.+?) experience$/.exec(text)||/^(?:total )?years of experience with (.+)$/.exec(text);
-  const question=/^how many years of (.+?) experience do you have$/.exec(text)||/^how many years of experience do you have (?:with|in) (.+)$/.exec(text);
-  let name=(total||question)?.[1];
-  if(!name)return null;
-  const skill=canonicalSkill(name==='react js'?'React.js':name);
-  if(['c','c++','c#'].includes(skill))return {skill,experience:professional?'professional':'total',ambiguous:true};
-  return yearSkills.has(skill)?{skill,experience:professional?'professional':'total'}:null;
-}
 const sensitiveTerms=/\b(?:authorized|authorization|sponsor\w*|citizen\w*|visa|legally|legal|consent|sms|salary|pay|compensation|certif\w*|clearance|identity)\b/;
 
 export function describeQuestion(field){
-  const years=skillYears(field.label),intent=years?.ambiguous?null:classify(field.label);
+  const screening=describeScreening(field),intent=screening.intent;
   const company=knownCompany(field.company),sms=intent==='sms';
   const scope=sms?(company?{kind:'company',company}:{kind:'job',jobId:String(field.jobId||'unknown')}):{kind:'global'};
-  if(years)Object.assign(scope,{skill:years.skill,experience:years.experience});
+  if(screening.qualifiers.skill)Object.assign(scope,{skill:screening.qualifiers.skill,experience:screening.qualifiers.experienceKind});
   return {intent,answerKey:savedAnswerKey(field),scope,controlType:field.type||'text',
-    reviewPolicy:years?.ambiguous||sms&&!company?'manual':intent?'known':'review',
-    risk:years?.ambiguous?'ambiguous_identity':sms||sensitiveTerms.test(normalizeQuestion(field.label))?'sensitive':'ordinary'};
+    reviewPolicy:screening.matchPolicy==='manual_only'?'manual':intent?'known':'review',
+    risk:screening.reasonCode==='ambiguous_legacy_identity'?'ambiguous_identity':sms||sensitiveTerms.test(normalizeQuestion(field.label))?'sensitive':'ordinary',screening};
 }
 
 function isSmsQuestion(key) {
@@ -78,21 +50,7 @@ export function savedAnswerKey(field) {
   return `sms consent for ${company}${positiveApplicationSms(key,company)?'':` question ${key}`}`;
 }
 
-function classify(label) {
-  const years=skillYears(label);
-  if(years&&!years.ambiguous)return `skill-years:${years.experience}:${years.skill}`;
-  const key=normalizeQuestion(label);
-  if(isSmsQuestion(key))return 'sms';
-  if(knownIntents.has(key))return knownIntents.get(key);
-  const withoutFormat=key.replace(/ (?:mm yyyy|month year|yyyy mm|yyyy mm dd|dd mm yyyy|mm dd yyyy|dd month yyyy)$/,'');
-  if(knownIntents.get(withoutFormat)==='graduation')return 'graduation';
-  const country=key.replace(/\b(?:the )?(?:u s|us|usa|united states(?: of america)?)$/,'united states');
-  if(/^(?:are you (?:currently )?(?:legally authorized to work|authorized to work legally|authorized to work)|do you have (?:legal )?authorization to work) in united states$/.test(country))return 'us-authorization';
-  const sponsorship=normalizeQuestion(String(label).replace(/\(\s*(?:like|such as|e\.?g\.?)\s+(?:an?\s+)?h[ -]?1b\s*\)/ig,''))
-    .replace(/\b(?:the )?(?:u s|us|usa|united states(?: of america)?)$/,'united states');
-  if(/^(?:will|do) you (?:now|currently) or (?:at any time )?(?:in the future|anytime (?:in the future|after graduation)) (?:require|need) (?:visa )?sponsorship(?: for (?:a )?(?:work|employment) visa)? (?:to work(?: legally)?|for employment) in united states$/.test(sponsorship))return 'us-sponsorship-now-future';
-  return null;
-}
+const classify=label=>describeScreening({label}).intent;
 
 function nonempty(value) {
   return value!==undefined&&value!==null&&String(value).trim()!=='';
@@ -100,11 +58,11 @@ function nonempty(value) {
 function suggestion(question,answer,reason) {return {question,answer,reason};}
 function answerMeaning(value,intent) {
   const key=normalizeQuestion(value);
-  if(['us-authorization','us-sponsorship-now-future','current-student'].includes(intent)){
+  if(['us-authorization','us-sponsorship-now-future','us-sponsorship-now','us-sponsorship-future','current-student'].includes(intent)){
     if(value===true||['yes','true','1','agree','i agree'].includes(key))return 'yes';
     if(value===false||['no','false','0','disagree'].includes(key))return 'no';
   }
-  if(intent?.startsWith('skill-years:')&&scalarYears(value))return String(Number(value));
+  if(isYearsIntent(intent)&&scalarYears(value))return String(Number(value));
   return String(value).normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
 }
 function graduationFormatCompatible(field,value) {
@@ -163,7 +121,8 @@ function genericSuggestions(key,entries) {
 function scalarYears(value){
   return (typeof value==='number'||typeof value==='string'&&/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim()))&&Number.isFinite(Number(value))&&Number(value)>=0;
 }
-function validYearsAnswer(field,intent,value){return !intent?.startsWith('skill-years:')||['select','radio'].includes(field.type)||scalarYears(value);}
+const isYearsIntent=intent=>intent?.startsWith('skill-years:')||intent?.startsWith('experience-years:');
+function validYearsAnswer(field,intent,value){return !isYearsIntent(intent)||['select','radio'].includes(field.type)||scalarYears(value);}
 
 // Equivalence is deliberately limited to known wording. Token similarity can only suggest.
 export function findSavedAnswer(field,answers) {
@@ -200,4 +159,4 @@ export function findSavedAnswer(field,answers) {
   const suggestions=genericSuggestions(key,entries);
   return {kind:'missing',reason:suggestions.length?'Similar saved answers need review':'No explicit saved answer',...(suggestions.length?{suggestions}:{})};
 }
-import {canonicalSkill} from './skills.mjs';
+import {describeScreening} from './screening-intelligence.mjs';
