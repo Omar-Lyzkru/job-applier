@@ -6,6 +6,7 @@ import {join,resolve} from 'node:path';
 import {chromium} from 'playwright';
 import {createStore} from '../src/store.mjs';
 import {createApp} from '../src/server.mjs';
+import {saveFailureSnapshot} from '../src/failure-snapshots.mjs';
 
 test('browser: dashboard setup, answers, controls and CSV work without rendering imported markup',async t=>{
   const dir=await mkdtemp(join(tmpdir(),'job-applier-dashboard-'));
@@ -668,4 +669,56 @@ test('browser: rejected answer saves preserve the stored answer and keep the edi
   assert.equal(await input.inputValue(),draft);
   assert.match(await card.textContent(),/Saved answer: Original response/);
   assert.equal(await page.locator('#toast').evaluate(element=>element.classList.contains('error')),true);
+});
+
+
+async function attentionPage(t){
+ const dir=await mkdtemp(join(tmpdir(),'job-applier-attention-')),store=await createStore(dir),commands=[];let state='idle',rejectRetry=false;
+ const resume=join(dir,'fixture.pdf');await writeFile(resume,'%PDF synthetic');
+ await store.saveConfig({profile:{firstName:'Test',lastName:'Applicant',email:'test@example.com',phone:'5551234567'},search:{titles:['Developer'],location:'Houston'},resume:{path:resume,filename:'fixture.pdf',size:14}});
+ const job=id=>({id:String(id),title:`Fixture role ${id}`,company:'Fixture employer',url:`https://www.linkedin.com/jobs/view/${id}/`});
+ const missing=await store.createRecord(job(3301),'needs_answer'),operational=await store.createRecord(job(3302),'needs_answer'),uncertain=await store.createRecord(job(3303),'unconfirmed',{attemptedAt:new Date().toISOString()}),manual=await store.createRecord(job(3304),'needs_answer'),unknown=await store.createRecord(job(3305),'failed'),interrupted=await store.createRecord(job(3306),'interrupted');
+ const question={key:'evening work',label:'Evening work?',type:'radio',required:true,options:[{label:'Yes',value:'y'},{label:'No',value:'n'}]};
+ await store.saveQuestions([{...question,jobId:'3301',blocker:'missing_answer'},{...question,jobId:'3302',blocker:'operational',reason:'Selection timed out'},{key:'manual control',label:'Manual control',jobId:'3304',type:'unsupported',required:true,blocker:'operational'},{key:'years of rust experience',label:'Years of Rust experience',type:'number',required:true,jobId:'3301',blocker:'missing_answer'}]);
+ await store.saveAnswers({'years of rust experience':0});
+ const runner={getStatus:()=>({state,todayCount:0,currentJob:null,message:'Ready'}),start:async options=>commands.push(['start',options]),retry:async options=>{if(rejectRetry)throw new Error('Synthetic retry unavailable');commands.push(['retry',options]);state='running';},stop:async()=>{state='idle';}};
+ const app=await createApp({dataDir:dir,store,runner,port:0});await app.listen();const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1360,height:960}});page.setDefaultTimeout(5000);
+ t.after(async()=>{await browser.close();await app.close();await rm(dir,{recursive:true,force:true});});await page.goto(app.url);await page.waitForFunction(()=>!document.querySelector('#browser-button').disabled);
+ return {dir,page,store,commands,records:{missing,operational,uncertain,manual,unknown,interrupted},setState:value=>{state=value;},rejectRetry:value=>{rejectRetry=value;}};
+}
+
+test('browser: attention retries selected jobs explicitly, respects dry run, polling and mobile layout',async t=>{
+ const {page,store,commands,records,setState,rejectRetry}=await attentionPage(t),list=page.locator('#attention-list'),card=id=>list.locator(`[data-record-id="${id}"]`);
+ await page.getByRole('heading',{name:'Needs attention',exact:true}).waitFor();
+ assert.equal(await card(records.missing.id).getByRole('button',{name:'Retry application',exact:true}).count(),0);
+ assert.equal(await card(records.uncertain.id).getByRole('button',{name:'Retry application',exact:true}).count(),0);assert.equal(await card(records.manual.id).getByRole('button',{name:'Retry application',exact:true}).count(),0);
+ assert.match(await card(records.unknown.id).textContent(),/unknown.*retry to inspect/i);
+ await page.getByRole('button',{name:'Answers',exact:true}).click();await page.locator('#pending-questions').getByLabel('Answer for Evening work?',{exact:true}).selectOption('No');await page.locator('#pending-questions').getByRole('button',{name:'Save this answer',exact:true}).click();await page.getByText('Answer saved',{exact:true}).waitFor();
+ assert.deepEqual(commands,[]);assert.equal((await store.getAnswers())['evening work'],'No');
+ await page.locator('#answers-view').getByRole('button',{name:'View applications needing attention',exact:true}).click();
+ assert.equal(await card(records.missing.id).getByRole('button',{name:'Retry application',exact:true}).count(),1);assert.match(await card(records.operational.id).textContent(),/check its form again/i);
+ await page.getByLabel('Dry run (no submissions)',{exact:true}).check();await card(records.missing.id).getByRole('button',{name:'Retry application',exact:true}).click();assert.deepEqual(commands,[['retry',{recordIds:[records.missing.id],dryRun:true}]]);
+ assert.equal(await page.getByRole('button',{name:'Resume ready applications',exact:true}).isDisabled(),true);setState('idle');await page.reload();
+ rejectRetry(true);await card(records.unknown.id).getByRole('button',{name:'Retry application',exact:true}).click();await page.getByText('Synthetic retry unavailable',{exact:true}).waitFor();assert.equal(await card(records.unknown.id).getByRole('button',{name:'Retry application',exact:true}).isEnabled(),true);rejectRetry(false);
+ await page.getByLabel('Dry run (no submissions)',{exact:true}).check();await page.getByRole('button',{name:'Resume ready applications',exact:true}).click();assert.deepEqual(commands.at(-1),['retry',{recordIds:[records.missing.id,records.interrupted.id],dryRun:true}]);
+ setState('idle');await page.reload();await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/attention-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve('test-artifacts/attention-mobile.png'),fullPage:true});
+});
+
+test('browser: attention diagnostics and polling preserve unrelated and retained answer drafts',async t=>{
+ const {page,store,records}=await attentionPage(t);await page.getByRole('button',{name:'Answers',exact:true}).click();
+ const answer=page.locator('#pending-questions').getByLabel('Answer for Evening work?',{exact:true});await answer.selectOption('No');await page.getByLabel('Question',{exact:true}).fill('Unrelated draft');await page.getByLabel('Answer',{exact:true}).fill('Keep me');
+ await store.createRecord({id:'3399',title:'New unrelated failure',company:'Other'},'failed');await waitBootstrap(page);assert.equal(await answer.inputValue(),'No');assert.equal(await page.getByLabel('Answer',{exact:true}).inputValue(),'Keep me');
+ await page.getByRole('button',{name:'Dashboard',exact:true}).click();await page.locator('#attention-list').locator(`[data-record-id="${records.unknown.id}"]`).getByRole('button',{name:'View diagnostics',exact:true}).click();await page.getByText('Diagnostic snapshot unavailable.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Answers',exact:true}).click();assert.equal(await answer.inputValue(),'No');assert.equal(await page.getByLabel('Question',{exact:true}).inputValue(),'Unrelated draft');
+ await store.saveQuestions((await store.getQuestions()).filter(q=>q.jobId!=='3301'&&q.jobId!=='3302'));await waitBootstrap(page);await page.locator('#retained-question-drafts').getByText('No',{exact:true}).waitFor();assert.equal(await page.getByLabel('Answer',{exact:true}).inputValue(),'Keep me');
+});
+
+
+test('browser: attention shows last update and guarded sanitized diagnostics on desktop and mobile',async t=>{
+ const {dir,page,records}=await attentionPage(t),card=page.locator('#attention-list').locator(`[data-record-id="${records.unknown.id}"]`);
+ await card.locator('.attention-updated').waitFor();assert.equal(await card.locator('time').getAttribute('datetime'),records.unknown.startedAt);
+ await saveFailureSnapshot(dir,records.unknown.id,{code:'validation',phase:'filling',controlCounts:{radio:2},html:'PLANTED SECRET',actions:[{kind:'select',durationMs:7,value:'PLANTED SECRET'}]});
+ await card.getByRole('button',{name:'View diagnostics',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.attention-diagnostic:not([hidden])')?.textContent.includes('validation'));
+ assert.equal((await card.locator('pre').textContent()).includes('PLANTED SECRET'),false);
+ await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/attention-diagnostics-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve('test-artifacts/attention-diagnostics-mobile.png'),fullPage:true});
 });

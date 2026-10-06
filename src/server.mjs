@@ -12,6 +12,9 @@ import {groupPendingQuestions} from './question-groups.mjs';
 import {analyzeResume} from './resume-analysis.mjs';
 import {roleFamilyPresets} from './search-profiles.mjs';
 import {skillVocabulary,canonicalSkill} from './skills.mjs';
+import {projectAttention,projectQuestions} from './attention-queue.mjs';
+import {blockerPolicy} from './application-lifecycle.mjs';
+import {readFailureSnapshot} from './failure-snapshots.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 function failure(message,status=400){return Object.assign(new Error(message),{status});}
@@ -37,8 +40,8 @@ function csvCell(value){
 }
 export async function createApp({dataDir=resolve(root,'data'),store,runner,port=3210}={}){
   store ||= await createStore(dataDir);
-  try{await store.recoverPending();}catch(error){await store.close();throw error;}
-  runner ||= createRunner({store,adapter:createLinkedInAdapter({dataDir})});
+  try{await store.recoverWork();}catch(error){await store.close();throw error;}
+  runner ||= createRunner({store,adapter:createLinkedInAdapter({dataDir}),dataDir});
   const token=randomBytes(32).toString('hex');let actualPort=port,recommendations=null;
   async function status(){
     const config=await store.getConfig(),history=await store.getHistory();
@@ -53,14 +56,27 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
       const allowed=new Set([`127.0.0.1:${actualPort}`,`localhost:${actualPort}`]);
       if(!allowed.has(req.headers.host))throw failure('Only local app requests are allowed',403);
       if(req.headers.origin && ![`http://127.0.0.1:${actualPort}`,`http://localhost:${actualPort}`].includes(req.headers.origin))throw failure('Cross-origin requests are not allowed',403);
-      if(req.method!=='GET'){
+      const rawPath=String(req.url).split('?')[0];
+      const diagnosticRequest=rawPath.startsWith('/api/diagnostic/');
+      if(req.method!=='GET'||diagnosticRequest){
         const supplied=Buffer.from(String(req.headers['x-app-token']||'')),expected=Buffer.from(token);
         if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected))throw failure('Invalid app command token. Refresh the dashboard.',403);
       }
+      let diagnosticId=null;
+      if(diagnosticRequest){
+        diagnosticId=rawPath.slice('/api/diagnostic/'.length);
+        if(!/^[a-f\d]{8}-[a-f\d]{4}-[1-8][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(diagnosticId))throw failure('Invalid diagnostic record ID');
+      }
       const path=new URL(req.url,`http://127.0.0.1:${actualPort}`).pathname;
+      if(req.method==='GET'&&diagnosticId){
+        if(!(await store.getHistory()).some(record=>record.id===diagnosticId))throw failure('Application record not found',404);
+        const diagnostic=await readFailureSnapshot(dataDir,diagnosticId);
+        if(!diagnostic)throw failure('Diagnostic snapshot unavailable.',404);
+        send({diagnostic});return;
+      }
       if(req.method==='GET' && path==='/api/bootstrap'){
         const config=await store.getConfig(),answers=await store.getAnswers(),history=await store.getHistory();
-        const pending=await store.getQuestions(),questions=[],reusedAnswers=history.slice(-30).flatMap(record=>Array.isArray(record.answerMatches)?record.answerMatches:[])
+        const pending=projectQuestions(history,await store.getQuestions()),questions=[],reusedAnswers=history.slice(-30).flatMap(record=>Array.isArray(record.answerMatches)?record.answerMatches:[])
           .filter(match=>Object.hasOwn(answers,match.sourceQuestion)&&Object.is(answers[match.sourceQuestion],match.answer));
         const jobs=new Map(history.map(record=>[record.job.id,record.job]));
         for(const original of pending){
@@ -98,7 +114,10 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
         const questionGroups=groupPendingQuestions(questions);
         const jobIds=new Set(questions.map(question=>String(question.jobId??'').trim()).filter(id=>id&&!['unknown','undefined','null'].includes(id.toLowerCase())));
         const questionCounts={distinctQuestions:questionGroups.length,affectedApplications:jobIds.size,occurrences:questions.length};
-        send({config,answers,questions,questionGroups,questionCounts,answerMemory,intelligenceOptions,history:history.slice(-200).reverse(),status:await status(),readiness:readiness(config),token});return;
+        const attention=projectAttention(history,pending,{profile:config.profile,answers});
+        const attentionCounts={total:attention.length,ready:attention.filter(item=>item.readyForBatch).length,manual:attention.filter(item=>item.blockers.some(blocker=>blockerPolicy(blocker.code).manual)).length,interrupted:attention.filter(item=>item.status==='interrupted').length,unconfirmed:attention.filter(item=>['unconfirmed','submission_pending'].includes(item.status)).length};
+        const displayed=history.map((record,index)=>({record,index,time:Date.parse(record.updatedAt||record.finishedAt||record.startedAt)||0})).sort((a,b)=>b.time-a.time||b.index-a.index).slice(0,200).map(({record})=>record);
+        send({config,answers,questions,questionGroups,questionCounts,answerMemory,intelligenceOptions,attention,attentionCounts,history:displayed,status:await status(),readiness:readiness(config),token});return;
       }
       if(req.method==='GET' && path==='/api/status'){send(await status());return;}
       if(req.method==='GET' && path==='/api/history.csv'){
@@ -136,6 +155,16 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
       }
       if(req.method==='POST' && path==='/api/answers'){send({answers:await store.saveAnswers(await readJson(req))});return;}
       if(req.method==='POST' && path==='/api/run'){await runner.start(await readJson(req));send(await status());return;}
+      if(req.method==='POST'&&path==='/api/retry'){
+        const input=await readJson(req);
+        if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['recordIds','dryRun'].includes(key))||!Array.isArray(input.recordIds)||input.recordIds.length<1||input.recordIds.length>100||input.recordIds.some(id=>typeof id!=='string'||!id)||new Set(input.recordIds).size!==input.recordIds.length||Object.hasOwn(input,'dryRun')&&typeof input.dryRun!=='boolean')throw failure('Retry needs 1–100 unique record IDs and an optional true/false dry run');
+        if(['running','stopping'].includes(runner.getStatus().state))throw failure('Stop the active run before retrying applications',409);
+        const history=await store.getHistory(),config=await store.getConfig(),answers=await store.getAnswers();
+        if(input.recordIds.some(id=>!history.some(record=>record.id===id)))throw failure('Unknown application record');
+        const attention=projectAttention(history,await store.getQuestions(),{profile:config.profile,answers});
+        if(input.recordIds.some(id=>{const item=attention.find(item=>item.recordId===id);return !item?.singleRetry||input.recordIds.length>1&&!item.readyForBatch;}))throw failure('Selected application is not eligible or ready for retry',409);
+        await runner.retry(input);send(await status());return;
+      }
       if(req.method==='POST' && path==='/api/stop'){await readJson(req);await runner.stop();send(await status());return;}
       if(req.method==='POST' && path==='/api/browser'){await readJson(req);await runner.openBrowser();send(await status());return;}
       const staticFiles={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/locations.js':'locations.js','/styles.css':'styles.css'};

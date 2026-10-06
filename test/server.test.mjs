@@ -6,17 +6,20 @@ import {join} from 'node:path';
 import {request} from 'node:http';
 import {createStore} from '../src/store.mjs';
 import {createApp} from '../src/server.mjs';
+import {saveFailureSnapshot} from '../src/failure-snapshots.mjs';
+import {makeBlocker} from '../src/application-lifecycle.mjs';
 
-async function setup(t){
+async function setup(t,{retry=false}={}){
   const dir=await mkdtemp(join(tmpdir(),'job-applier-api-'));const store=await createStore(dir);
   let state='idle';const commands=[];
   const runner={getStatus:()=>({state,message:'Ready',todayCount:0,currentJob:null}),start:async options=>{state='running';commands.push(['start',options]);},stop:async()=>{state='idle';commands.push(['stop']);},openBrowser:async()=>commands.push(['browser'])};
+  if(retry)runner.retry=async options=>commands.push(['retry',options]);
   const app=await createApp({dataDir:dir,store,runner,port:0});await app.listen();
   t.after(async()=>{await app.close();await rm(dir,{recursive:true,force:true});});
   const bootstrap=await (await fetch(app.url+'/api/bootstrap')).json();
   const send=(path,body={},headers={})=>fetch(app.url+path,{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':bootstrap.token,...headers},body:JSON.stringify(body)});
   const upload=(filename,body)=>fetch(app.url+'/api/resume',{method:'POST',headers:{'X-App-Token':bootstrap.token,'X-Filename':encodeURIComponent(filename),'Content-Type':'application/octet-stream'},body});
-  return {dir,store,app,bootstrap,send,upload,commands};
+  return {dir,store,app,bootstrap,send,upload,commands,setState:value=>{state=value;}};
 }
 
 test('current-student common question stays blank until an explicit answer is saved',async t=>{
@@ -383,4 +386,73 @@ test('résumé analysis rejects DOCX content renamed to legacy DOC before parsin
   assert.match((await response.json()).error,/DOC format|legacy Word/i);
   assert.deepEqual((await store.getConfig()).resume,saved);
   assert.deepEqual(await readFile(saved.path),bytes);
+});
+
+
+const attentionJob=id=>({id:String(id),title:`Role ${id}`,company:'Fixture employer',url:`https://www.linkedin.com/jobs/view/${id}/`});
+const missingFixture=(id,key='evening work',type='radio')=>({jobId:String(id),key,label:type==='number'?'Years of Rust experience':'Evening work?',type,required:true,blocker:'missing_answer',options:type==='radio'?[{label:'Yes',value:'y'},{label:'No',value:'n'}]:[]});
+
+test('attention uses full history, canonical questions, explicit No/zero and safe eligibility',async t=>{
+ const {store,app,send}=await setup(t,{retry:true});
+ const old=await store.createRecord(attentionJob(8000),'needs_answer');
+ const zero=await store.createRecord(attentionJob(8001),'needs_answer');
+ const unknown=await store.createRecord(attentionJob(8002),'failed');
+ const manual=await store.createRecord(attentionJob(8003),'needs_answer');
+ const uncertain=await store.createRecord(attentionJob(8004),'unconfirmed',{attemptedAt:new Date().toISOString()});
+ await store.createRecord(attentionJob(8005),'needs_answer');await store.createRecord(attentionJob(8005),'submitted',{attemptedAt:new Date().toISOString()});
+ await store.saveQuestions([missingFixture(8000),missingFixture(8001,'years of rust experience','number'),{...missingFixture(8003),type:'unsupported',blocker:'operational'},missingFixture(8005),missingFixture('unknown')]);
+ for(let i=0;i<201;i++)await store.createRecord(attentionJob(9000+i),'skipped');
+ await send('/api/answers',{'evening work':false,'years of rust experience':0});
+ const data=await (await fetch(app.url+'/api/bootstrap')).json();
+ assert.equal(data.history.length,200);assert.equal(data.history.some(r=>r.id===old.id),false);
+ const items=new Map(data.attention.map(a=>[a.recordId,a]));
+ assert.equal(items.get(old.id).readyForBatch,true);assert.equal(items.get(zero.id).readyForBatch,true);
+ assert.equal(items.get(unknown.id).singleRetry,true);assert.equal(items.get(unknown.id).readyForBatch,false);
+ assert.equal(items.get(manual.id).singleRetry,false);assert.equal(items.get(uncertain.id).singleRetry,false);
+ assert.equal(data.attention.some(a=>a.job.id==='8005'),false);assert.equal(data.attention.some(a=>!a.recordId),true);
+ assert.deepEqual(data.attentionCounts,{total:6,ready:2,manual:1,interrupted:0,unconfirmed:1});
+ assert.equal((await store.getQuestions()).length,5);
+});
+
+test('recent history sorts updated completion before limiting without changing canonical order',async t=>{
+ const {store,app}=await setup(t);let record=await store.createWork(attentionJob(7000),{now:new Date('2026-01-01')});
+ for(let i=0;i<201;i++)await store.createRecord(attentionJob(7100+i),'skipped',{startedAt:'2026-01-02T00:00:00.000Z'});
+ record=await store.transitionWork(record.id,{expectedRevision:record.revision,status:'failed',blockers:[makeBlocker('navigation')],now:new Date('2090-01-03')});
+ const data=await (await fetch(app.url+'/api/bootstrap')).json();assert.equal(data.history[0].id,record.id);assert.equal(data.history.length,200);
+ assert.equal((await store.getHistory())[0].id,record.id);
+});
+
+test('retry command accepts one or 100 ready IDs and strictly rejects unsafe or malformed requests',async t=>{
+ const {store,send,commands,setState}=await setup(t,{retry:true});const ids=[];
+ for(let i=0;i<100;i++)ids.push((await store.createRecord(attentionJob(6000+i),'interrupted')).id);
+ assert.equal((await send('/api/retry',{recordIds:[ids[0]],dryRun:true})).status,200);
+ assert.equal((await send('/api/retry',{recordIds:ids,dryRun:false})).status,200);
+ assert.deepEqual(commands.slice(-2),[['retry',{recordIds:[ids[0]],dryRun:true}],['retry',{recordIds:ids,dryRun:false}]]);
+ for(const body of [null,[],{}, {recordIds:[]},{recordIds:[ids[0],ids[0]]},{recordIds:[...ids,'extra']},{recordIds:[1]},{recordIds:['']},{recordIds:[ids[0]],dryRun:'true'},{recordIds:[ids[0]],path:'/tmp/private'},{recordIds:['unknown']}])assert.equal((await send('/api/retry',body)).status,400,JSON.stringify(body));
+ setState('running');assert.equal((await send('/api/retry',{recordIds:[ids[0]]})).status,409);setState('idle');
+ const attempted=await store.createRecord(attentionJob(6100),'unconfirmed',{attemptedAt:new Date().toISOString()});assert.equal((await send('/api/retry',{recordIds:[attempted.id]})).status,409);
+ const unknown=await store.createRecord(attentionJob(6101),'failed');assert.equal((await send('/api/retry',{recordIds:[unknown.id,ids[0]]})).status,409);
+ const unresolved=await store.createRecord(attentionJob(6102),'needs_answer');await store.saveQuestions([missingFixture(6102)]);assert.equal((await send('/api/retry',{recordIds:[unresolved.id]})).status,409);
+ const queued=await store.createWork(attentionJob(6103));assert.equal((await send('/api/retry',{recordIds:[queued.id]})).status,409);
+});
+
+test('retry and diagnostic retain independent token, origin and host guards',async t=>{
+ const {store,app,send,bootstrap}=await setup(t,{retry:true});const record=await store.createRecord(attentionJob(5000),'failed');
+ for(const headers of [{'X-App-Token':''},{Origin:'https://evil.example'}])assert.equal((await send('/api/retry',{recordIds:[record.id]},headers)).status,403);
+ const path=`/api/diagnostic/${record.id}`;
+ for(const target of ['/api/retry',path]){
+  const code=await new Promise((resolveCode,reject)=>{const req=request(app.url+target,{method:target==='/api/retry'?'POST':'GET',headers:{Host:'evil.example','X-App-Token':bootstrap.token}},res=>{res.resume();resolveCode(res.statusCode);});req.on('error',reject);req.end();});assert.equal(code,403);
+ }
+ for(const headers of [{},{'X-App-Token':bootstrap.token,Origin:'https://evil.example'}])assert.equal((await fetch(app.url+path,{headers})).status,403);
+});
+
+test('diagnostic only exposes sanitized known record snapshots and rejects arbitrary paths',async t=>{
+ const {dir,store,app,bootstrap}=await setup(t);const record=await store.createRecord(attentionJob(4000),'failed',{reason:'private reason SECRET'});
+ await saveFailureSnapshot(dir,record.id,{code:'validation',phase:'filling',html:'SECRET',answers:{phone:'SECRET'},controlCounts:{text:2},actions:[{kind:'fill',durationMs:4,label:'SECRET'}]});
+ const headers={'X-App-Token':bootstrap.token};let response=await fetch(app.url+`/api/diagnostic/${record.id}`,{headers});assert.equal(response.status,200);const data=await response.json();assert.equal(data.diagnostic.code,'validation');assert.equal(JSON.stringify(data).includes('SECRET'),false);
+ const missing=await store.createRecord(attentionJob(4001),'failed');response=await fetch(app.url+`/api/diagnostic/${missing.id}`,{headers});assert.equal(response.status,404);assert.match((await response.json()).error,/unavailable/i);
+ assert.equal((await fetch(app.url+'/api/diagnostic/00000000-0000-4000-8000-000000000000',{headers})).status,404);
+ for(const path of ['bad-id',`${record.id}%2fprivate`,`${record.id}%5cprivate`,'%2e%2e/config.json','../../config.json']){
+  const code=await new Promise((resolveCode,reject)=>{const req=request(app.url,{path:'/api/diagnostic/'+path,headers},res=>{res.resume();resolveCode(res.statusCode);});req.on('error',reject);req.end();});assert.equal(code,400,path);
+ }
 });

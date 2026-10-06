@@ -2,10 +2,10 @@ import {countries} from './locations.js';
 
 const byId=id=>document.getElementById(id);
 const profileKeys=['firstName','lastName','email','phone','city','state','postalCode','country','linkedinUrl','website'];
-const resultNames={submitted:'Submitted',unconfirmed:'Unconfirmed',submission_pending:'Submission pending',needs_answer:'Needs answer',ready:'Ready — dry run',skipped:'Skipped',failed:'Failed'};
+const resultNames={submitted:'Submitted',unconfirmed:'Unconfirmed',submission_pending:'Submission pending',needs_answer:'Needs answer',ready:'Ready — dry run',skipped:'Skipped',failed:'Failed',queued:'Queued',inspecting:'Inspecting',filling:'Filling',needs_attention:'Needs attention',interrupted:'Interrupted'};
 const pageCopy={dashboard:['Your application workspace','Find matching jobs and apply using your saved profile.'],settings:['Set up your next search','Your profile, résumé, and preferences for the next run.'],answers:['Saved answers','Your answers to the questions employers ask.'],history:['Application history','A record of what was submitted, skipped, or needs attention.']};
 let state=null,ready=false,busy=false,view='dashboard',toastTimer,questionSignature='',answerSignature='',controlId=0,committedCountry='';
-let commonSignature='',recognizedSignature='',smsEmployersSignature='';
+let commonSignature='',recognizedSignature='',smsEmployersSignature='',attentionSignature='';
 const answerDrafts=new Map();
 const pendingDrafts=new Map();
 let pendingGroupCounts=new Map();
@@ -34,6 +34,7 @@ function syncControls(){
   const capReached=state&&state.status.todayCount>=state.config.dailyCap;
   byId('start-button').disabled=!ready||busy||active||state.readiness.length>0||(!dryRun&&capReached);
   byId('start-label').textContent=dryRun?'Start dry run':'Start applying';
+  document.querySelectorAll('.retry-action').forEach(button=>{button.disabled=!ready||busy||active||state.readiness.length>0||(!dryRun&&capReached)||button.dataset.eligible==='false';});
   byId('stop-button').disabled=!ready||busy||!active;
   byId('browser-button').disabled=!ready||busy||active;
   byId('save-settings').disabled=!ready||busy;byId('save-answer').disabled=!ready||busy;byId('resume-upload').disabled=!ready||busy;
@@ -237,7 +238,7 @@ function renderRows(body,records){
       for(const uncertainty of assessment.uncertainties||[])details.append(create('p',null,uncertainty));
       for(const reason of assessment.reasons||[])details.append(create('p',null,reason.message));result.append(details);
     }
-    const date=new Date(record.finishedAt||record.attemptedAt||record.startedAt);
+    const date=new Date(record.updatedAt||record.finishedAt||record.attemptedAt||record.startedAt);
     when.textContent=Number.isNaN(date.getTime())?'—':new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:state.config.timezone}).format(date);
     row.append(title,company,result,when);fragment.append(row);
   }
@@ -248,6 +249,47 @@ function renderHistory(){
   const query=byId('history-search').value.toLowerCase(),filter=byId('history-filter').value;
   const history=state.history.filter(record=>(filter==='all'||record.status===filter)&&`${record.job.title} ${record.job.company}`.toLowerCase().includes(query));
   renderRows(byId('history-body'),history);byId('history-empty').hidden=history.length>0;
+}
+
+function retryApplications(recordIds){
+  perform(()=>api('/api/retry',{recordIds,dryRun:byId('dry-run').checked}),'Selected applications queued');
+}
+function renderAttention(){
+  const items=state.attention||[],counts=state.attentionCounts||{total:items.length,ready:0,manual:0,interrupted:0,unconfirmed:0};
+  byId('attention-summary').textContent=`${counts.total} applications · ${counts.ready} ready to resume · ${counts.manual} need manual completion · ${counts.interrupted} interrupted · ${counts.unconfirmed} uncertain`;
+  const selected=items.filter(item=>item.readyForBatch&&item.recordId).slice(0,100).map(item=>item.recordId);
+  byId('resume-ready-button').dataset.eligible=String(selected.length>0);
+  byId('resume-ready-button').title=selected.length?`Resume ${selected.length} ready applications using the dry run choice above`:'Save missing answers before resuming';
+  byId('attention-empty').hidden=items.length>0;
+  const signature=JSON.stringify(items);if(signature===attentionSignature)return;attentionSignature=signature;
+  const fragment=document.createDocumentFragment();
+  for(const item of items){
+    const card=create('article','attention-item');if(item.recordId)card.dataset.recordId=item.recordId;
+    const heading=create('h3'),url=item.job.url||(/^\d+$/.test(String(item.job.id))?`https://www.linkedin.com/jobs/view/${item.job.id}/`:null);
+    let validUrl=false;try{const parsed=new URL(url);validUrl=parsed.protocol==='https:'&&(parsed.hostname==='linkedin.com'||parsed.hostname.endsWith('.linkedin.com'));}catch{}
+    const title=create(validUrl?'a':'span',null,item.job.title||'Job details unavailable');
+    if(validUrl){title.href=url;title.target='_blank';title.rel='noopener noreferrer';}heading.append(title);card.append(heading);
+    card.append(create('p','attention-context',`${item.job.company||'Employer unavailable'} · ${resultNames[item.status]||'Needs attention'} · ${String(item.phase||'unknown').replaceAll('_',' ')}`));
+    const updated=new Date(item.updatedAt),timestamp=create('time','attention-updated');
+    if(item.updatedAt&&!Number.isNaN(updated.getTime())){timestamp.dateTime=updated.toISOString();timestamp.textContent=`Updated ${new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:state.config.timezone}).format(updated)}`;}else timestamp.textContent='Update time unavailable';
+    card.append(timestamp);
+    for(const blocker of item.blockers||[])card.append(create('p','attention-blocker',blocker.summary));
+    card.append(create('p','attention-reason',item.retryReason));
+    const actions=create('div','attention-actions');
+    if(item.questions?.length){
+      const questions=create('button','text-button',`View questions (${item.questions.length})`);questions.type='button';questions.addEventListener('click',()=>{setView('answers');byId('pending-questions').scrollIntoView({block:'start'});});actions.append(questions);
+    }
+    if(item.singleRetry&&item.recordId){const retry=create('button','button retry-action','Retry application');retry.type='button';retry.addEventListener('click',()=>retryApplications([item.recordId]));actions.append(retry);}
+    if(item.recordId){
+      const button=create('button','text-button','View diagnostics'),output=create('pre','attention-diagnostic');button.type='button';output.hidden=true;output.setAttribute('role','status');
+      button.addEventListener('click',async()=>{
+        button.disabled=true;output.hidden=false;output.textContent='Loading diagnostics…';
+        try{const response=await fetch(`/api/diagnostic/${encodeURIComponent(item.recordId)}`,{headers:{'X-App-Token':state.token}}),data=await response.json();if(!response.ok)throw new Error(data.error||'Diagnostic snapshot unavailable.');output.textContent=JSON.stringify(data.diagnostic,null,2);}catch(error){output.textContent=error.message;}finally{button.disabled=false;}
+      });actions.append(button);card.append(actions,output);
+    }else card.append(actions);
+    fragment.append(card);
+  }
+  byId('attention-list').replaceChildren(fragment);
 }
 function inputLabel(text,input){
   const wrapper=create('div','field answer-field'),label=create('label',null,text);
@@ -458,12 +500,14 @@ function render(){
   byId('resume-step').classList.toggle('complete',Boolean(config.resume));
   byId('resume-name').textContent=config.resume?.filename||'No résumé uploaded';byId('resume-detail').textContent=config.resume?`${Math.ceil(config.resume.size/1000)} KB · ready to use`:'PDF, DOC, or DOCX · up to 2 MB';
   if((config.resume?.path||'')!==recommendationResume)clearRecommendations(config.resume);
-  renderHistory();renderQuestions();renderCommonQuestions();renderSmsConsent();renderRecognizedAnswers();renderLibrary();syncControls();
+  renderHistory();renderAttention();renderQuestions();renderCommonQuestions();renderSmsConsent();renderRecognizedAnswers();renderLibrary();syncControls();
 }
 async function refresh(){
   state=await api('/api/bootstrap');const first=!ready;ready=true;if(first)fillSettings();render();
 }
 byId('dry-run').addEventListener('change',syncControls);
+byId('resume-ready-button').addEventListener('click',()=>retryApplications((state.attention||[]).filter(item=>item.readyForBatch&&item.recordId).slice(0,100).map(item=>item.recordId)));
+document.querySelectorAll('[data-attention-link]').forEach(button=>button.addEventListener('click',()=>{setView('dashboard');byId('attention-panel').scrollIntoView({block:'start'});}));
 byId('start-button').addEventListener('click',()=>perform(()=>api('/api/run',{dryRun:byId('dry-run').checked}),'Run started'));
 byId('stop-button').addEventListener('click',()=>perform(()=>api('/api/stop',{}),'Run stopped'));
 byId('browser-button').addEventListener('click',()=>perform(()=>api('/api/browser',{}),'LinkedIn browser opened'));
