@@ -73,26 +73,76 @@ Results show **Fit** and **Why this fit**, including points, skill gaps and
 uncertainties. Recognized unpaid, commission-only or incompatible required roles
 can be excluded before scoring. Strong reposts need matching company, equivalent
 title, known location and description; prior submitted or uncertain attempts
-block another attempt. Unattempted failures can be retried. An unreadable posting
-halts the run before queued jobs are applied.
+block another attempt. Unattempted failures can be retried explicitly. A known local failure, such as
+an unreadable posting, is recorded and other jobs continue when safe. Unknown
+failures, sign-in challenges, storage problems, and failed cleanup pause the run.
 
 English parsing and synthetic browser tests cannot cover every employer wording
 or LinkedIn layout. Unknown eligibility and weaker duplicate similarity need
-review. These changes do not fix LinkedIn form-entry timeouts; those remain in
-Phase 2.
+review. Form convergence and recovery are described below; live layouts may
+still require manual completion.
+
+## Needs attention and explicit resume
+
+The Dashboard lists blocked and interrupted applications with their job link,
+phase, last update, blocker and retry eligibility. Counts include the full local
+history, even when an item falls outside the latest 200 History rows. Answers
+and History link back to this list.
+
+Save required answers in **Answers**, then choose **Retry application** to
+reinspect just that job. **Resume ready applications** retries up to 100 jobs
+whose missing answers are resolved, plus safely interrupted work. Operational
+or unknown legacy failures require an individual retry; unsupported controls
+and uncertain attempts have no retry button. Saving an answer and dashboard
+polling never start applications.
+
+Retries use the visible **Dry run (no submissions)** choice and current saved
+settings, résumé and answers. Each run keeps one snapshot of those inputs.
+Changed preferences can cause an old job to be skipped. Targeted resume opens
+original job URLs without a new search; it refills a fresh form rather than
+restoring stale controls. Linked retry records preserve the earlier failure.
+
+The app saves work before inspecting/filling and reserves an attempt before
+Submit. On restart, unfinished pre-submit work becomes **Interrupted** and a
+reserved submission becomes **Unconfirmed**. It never resumes automatically.
+Attempted and equivalent submitted/uncertain jobs remain protected against
+another submission, including during concurrent commands or pacing waits.
+
+Form entry rediscovers controls after changes, verifies the selected answer,
+and checks newly appearing questions. Navigation and entry retries are bounded;
+only recognized temporary network failures get up to two navigation retries.
+The form is checked again after pacing and immediately before reserving Submit.
+Stop interrupts bounded waits and records any submission already in flight.
+The app does not retry Submit automatically.
+
+**View diagnostics** shows a local sanitized failure snapshot when available.
+Snapshots contain fixed failure codes, phase/page index, control counts,
+hashed control fingerprints, validation categories and action timings.
+They omit form values, employer text, raw errors, résumé filenames, HTML,
+cookies and screenshots. Files stay under ignored `data/failures/` with private
+permissions and a limit of 100 owned snapshots. Snapshot failure does not change
+application truth; missing snapshots show an unavailable message. Diagnostic
+access requires the app token and a known history record.
+
+English-only controls and synthetic checks cannot guarantee every live employer
+form, late form change or LinkedIn layout. Complete unsupported controls or
+verification directly in LinkedIn; uncertain submissions need a manual check.
 
 ## Results
 
 - **Submitted:** observed LinkedIn confirmation after Submit.
 - **Unconfirmed:** Submit may have been sent, but confirmation was not observed. Check the job on LinkedIn. The app never automatically retries this job.
 - **Submission pending:** an attempt has been durably reserved. A restart converts it to Unconfirmed.
-- **Needs answer:** a required question or an unknown prefilled value needs explicit information. Save the answer, then run again. Unsupported controls, read-only mismatches, and failed entry remain pending until a successful retry verifies them; saving an answer alone cannot resolve those form problems.
+- **Needs answer:** a required question or an unknown prefilled value needs explicit information. Save the answer, then explicitly retry the application from Needs attention. Unsupported controls, read-only mismatches, and failed entry remain pending until a successful retry verifies them; saving an answer alone cannot resolve those form problems.
+- **Needs attention:** a form or operational blocker requires inspection or manual completion.
+- **Interrupted:** queued or unfinished pre-submit work was preserved after Stop or restart.
+- **Queued / Inspecting / Filling:** durable work currently in progress.
 - **Ready — dry run:** review was reached without submitting.
 - **Skipped / Failed:** read the recorded reason in History.
 
 Pending and uncertain attempts count toward the daily cap. Defaults are 10 applications per day, at most 100 jobs inspected per run, and 45 seconds between attempts. The counter resets at midnight in your configured timezone, initially America/Chicago. LinkedIn may enforce a separate application/speed limit; the runner pauses when it sees one.
 
-Company-site applications are skipped. Changed layouts, unsupported controls, sign-in checks, and verification challenges pause the run or produce a recorded reason. The browser adapter targets English LinkedIn screens. It follows the known **Job search safety reminder** through **Continue applying** and waits for the application fields to load. Unfamiliar warnings and verification checks require your attention. Open LinkedIn to complete sign-in/verification or handle unsupported forms manually.
+Company-site applications require manual completion and have no automatic retry. Changed layouts and unsupported controls produce a recorded attention item; the run can continue after confirmed cleanup. Sign-in checks, unfamiliar verification warnings, platform limits, storage failures, and cleanup failures pause the run. The browser adapter targets English LinkedIn screens. It follows the known **Job search safety reminder** through **Continue applying** and waits for the application fields to load. Unfamiliar warnings and verification checks require your attention. Open LinkedIn to complete sign-in/verification or handle unsupported forms manually.
 
 Résumé uploads support both file fields and LinkedIn's newer **Upload resume** chooser. The app uses a unique filename to verify that the freshly uploaded document was accepted and selected. An older document with the same original filename cannot satisfy that check.
 

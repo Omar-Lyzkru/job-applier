@@ -422,3 +422,112 @@ Final: Ruling: exact current live LinkedIn selectors/confirmation wording set as
 Final: Ruling: universal employer widget support set aside by reviewer — supported native controls work; visible unsupported required or selected ARIA widgets block submission — cost: some jobs require manual completion.
 Final: Ruling: visual polish set aside by reviewer — author inspected desktop and mobile screenshots and verified no mobile document overflow — cost: visual preference changes remain the user's decision.
 Final: deferred minors: none.
+
+
+## Phase 2 — Reliability (2026-10-06)
+
+Implemented additive durable application states, revision-checked transitions,
+atomic retry claims and post-pacing submission reservations. Startup preserves
+unfinished work as interrupted and reserved attempts as uncertain. Required
+question projection and attention use full canonical history, with conservative
+legacy/orphan handling; display sorting never reorders that history.
+
+Forms reacquire unique semantic controls after replacement, verify displayed
+choices and selected résumés, rescan delayed conditional controls and earlier
+resets, and stop within bounded convergence/action/navigation limits. Adapter
+progress is saved before entry. Page transitions require fresh state; final
+read-only validation occurs after pacing and before the protected Submit click.
+Typed local failures can continue only after confirmed cleanup. Unknown/global
+conditions and failed cleanup halt. Temporary pre-submit network retries are
+bounded; protected submissions cannot be retried automatically.
+
+The runner supports explicit single-job retry and a ready-only batch of at most
+100, preserving one config/answer/résumé snapshot and applying current filters,
+ranking, cap, pacing, duplicate and Stop rules. Retry claims retain historical
+parents. Saving answers and polling never launch work.
+
+Dashboard Needs attention exposes full-history counts, last update, blocker,
+phase, original job links, eligibility and guarded diagnostics. The token/origin/
+host boundary is enforced independently for retry and diagnostic access. A UUID
+is mapped to a known record and fixed snapshot path; malformed/traversal paths
+are rejected before URL normalization. Diagnostic schemas exclude private values
+and arbitrary text, are limited to 64 KiB, use private permissions and keep at
+most 100 owned snapshots. Missing/corrupt/unwritable snapshots do not alter
+canonical state.
+
+Verification before the independent final review:
+
+- `npm test`: **196/196** unit/API/storage/lifecycle/diagnostic/runner tests.
+- `npm run test:browser`: **145/145** Chromium adapter/forms/dashboard scenarios.
+- Focused server: **33/33**; dashboard **36/36** plus **1/1** last-update and
+  guarded diagnostic scenario. New tests were observed failing before changes.
+- Syntax checks passed for **22** changed JavaScript files; branch whitespace
+  checks passed.
+- Synthetic desktop and 390px screenshots of attention, diagnostic JSON,
+  saved answers and retained drafts were inspected. No horizontal document
+  overflow; History keeps its contained horizontal table scroll.
+
+The tests cover genuine file-write failures, concurrent reservation/claims,
+Stop during collection/navigation, conditional native/custom controls, replaced
+radio groups without a second toggle, same-text fresh pages, ignored/busy Next,
+post-pacing late controls, selected-résumé changes, employer validation versus
+successful upload notices, unknown/challenge failures, failed cleanup, answer
+No/zero, raw pending projections, older-than-200 attention, outcome-time history
+sorting, ready-batch snapshots, endpoint guards and planted diagnostic secrets.
+
+Changed production files: `src/application-lifecycle.mjs`,
+`src/attention-queue.mjs`, `src/failure-snapshots.mjs`, `src/store.mjs`,
+`src/domain.mjs`, `src/runner.mjs`, `src/server.mjs`, `src/browser/forms.mjs`,
+`src/browser/linkedin.mjs`, `src/browser/session.mjs`, `public/app.js`,
+`public/index.html`, `public/styles.css` and `package.json`. Tests changed in
+`test/adapter.test.mjs`, `test/application-lifecycle.test.mjs`,
+`test/dashboard.test.mjs`, `test/failure-snapshots.test.mjs`,
+`test/forms.test.mjs`, `test/runner.test.mjs`, `test/server.test.mjs`,
+`test/session.test.mjs`, `test/store.test.mjs` and the LinkedIn/modern-screening
+fixtures. README and the approved Phase 2 plan record behavior and completion.
+
+All application checks used synthetic fixtures. No live LinkedIn application
+was submitted and fixture success is not a live compatibility guarantee. Unknown
+or unsupported controls, adversarial late changes and verification can still
+require manual care. General question-scope/key migration remains Phase 3,
+multiple résumés/tailoring Phase 4, analytics Phase 5 and new sources Phase 6.
+Uncertain submission override and universal custom-widget support are excluded.
+
+The fresh independent reviewer found four Important issues and no Critical or
+Minor issues. One correction pass reproduced each before changing code:
+
+- Disappearing document choices while an upload region remains now block final
+  readiness and post-pacing reservation; hidden/aria-labelled choices still work.
+- After rename, in-memory state follows the committed file even if directory
+  sync fails. The error still aborts the operation; recovery preserves the
+  reservation and attempted timestamp rather than writing stale pre-submit state.
+- Unconfirmed/reserved attempts remain in full-history attention after a later
+  rediscovery skip or dry run, with their original record and disabled retry.
+- Validated page-counter advancement identifies a fresh page even when heading,
+  control and button nodes are reused. Reset answers are filled again while
+  unchanged-page errors, employer validation and loading remain blocking.
+
+Final corrected verification: **199/199** unit/API and **148/148** browser tests,
+with no failures, cancellations or skips. Syntax checks for all 22 changed
+JavaScript files and whitespace checks passed. No second review was dispatched;
+all four findings have RED→GREEN coverage and the full suites passed.
+
+Native rulings carried through delivery:
+
+- Scoped approved writes in the managed checkout avoid altering the primary app;
+  cost if wrong: permission overhead.
+- Just-completed full verification is reused when source is unchanged; cost if
+  wrong: an unnoticed concurrent edit could weaken that evidence.
+- Ordinary loading failure is local after confirmed cleanup; cost if wrong:
+  other jobs might continue during a wider platform problem. Unknown/challenge
+  and failed cleanup still halt.
+- Live compatibility and the original live timeout cause remain unverified;
+  cost if wrong: live forms still need manual completion.
+- Universal widgets and broader answer migration stay deferred; cost if wrong:
+  unsupported/ambiguous questions still require manual care.
+- Root inspected functional desktop/mobile screenshots; subjective styling was
+  outside independent review. Cost if wrong: visual preferences may remain unmet.
+- Production migration/restart/GitHub delivery are verified by the root before
+  completion; cost if wrong: stored data or local/remote code could differ.
+
+Deferred minors: none. Production delivery evidence follows once verified.
