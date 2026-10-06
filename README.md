@@ -169,6 +169,20 @@ recognized wording and shows their source. It recognizes years of Java,
 JavaScript, TypeScript, Python, Rust, React, Node.js, SQL, PostgreSQL, and Git
 experience, preserving the distinction between total and professional years.
 Matching-profile facts and résumé skills never fill these screening answers.
+
+The app also recognizes explicitly named overall total/professional experience
+and selected equivalent current/completed-degree and student questions. US
+sponsorship needed **now**, **in the future**, and **now or in the future** are
+three distinct meanings: one answer never supplies another period. Only your
+explicit answer to that same meaning can be reused.
+
+Pending and common question cards explain the meaning and whether a saved answer
+matches. Expand **Why this answer** for its source and any format/entry issue.
+A legal question can reuse a compatible confirmed No without asking again;
+changed choices, unknown wording, conflicting values and unsupported controls
+still need review. Salary, relocation and non-SMS consent have no new automatic
+aliases. These explanations do not change saved answers or launch applications.
+
 Current study and completed education, work authorization and sponsorship, and
 each employer's consent remain separate. Old C/C++/C# experience keys can
 collide, so those questions require manual confirmation in LinkedIn.

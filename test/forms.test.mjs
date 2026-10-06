@@ -421,3 +421,21 @@ test('read-only final verification detects a new required field and a changed se
 test('final readiness rejects disappearing document choices while the resume region remains',async t=>{
  const {page,dialog,options}=await setup(t);assert.deepEqual(await fillApplicationFields(dialog,options),{questions:[],errors:[]});await page.evaluate(()=>document.querySelectorAll('#resume-region input[type=radio]').forEach(el=>el.remove()));const verified=await verifyApplicationFields(dialog,options);assert.equal(verified.ok,false);assert.ok(verified.blockers.some(b=>b.code==='resume_upload'));
 });
+
+test('screening meaning fills only explicit matching sponsorship periods and retains ambiguous required controls',async t=>{
+ const {page,dialog,options}=await setup(t);
+ const labels=[['now','Do you currently require sponsorship to work in the US?'],['future','Will you require sponsorship to work in the US in the future?'],['combined','Will you now or in the future require sponsorship to work in the US?'],['auth','Are you legally authorized to work in the United States?']];
+ await page.setContent(`<div role="dialog">${labels.map(([name,label])=>`<fieldset><legend>${label}</legend><label><input type="radio" name="${name}" value="same" required>Yes</label><label><input type="radio" name="${name}" value="same" required>No</label></fieldset>`).join('')}<label>Years of paid Python experience<input name="paid" type="number" required></label><div role="combobox" aria-label="Unusual eligibility requirement" aria-required="true" tabindex="0"></div></div>`);
+ const answers={'do you currently require sponsorship to work in the united states':false,'will you require sponsorship to work in the united states in the future':'No','are you legally authorized to work in the united states':true,'years of python experience':5};
+ const result=await fillApplicationFields(dialog,{...options,answers});
+ assert.equal(await dialog.locator('input[name=now]').nth(1).isChecked(),true);assert.equal(await dialog.locator('input[name=future]').nth(1).isChecked(),true);assert.equal(await dialog.locator('input[name=auth]').first().isChecked(),true);assert.equal(await dialog.locator('input[name=combined]:checked').count(),0);assert.equal(await dialog.locator('input[name=paid]').inputValue(),'');
+ assert.ok(result.questions.some(q=>q.label===labels[2][1]));assert.ok(result.questions.some(q=>q.label==='Years of paid Python experience'));assert.ok(result.questions.some(q=>q.type==='unsupported'));
+ const final=await verifyApplicationFields(dialog,{...options,answers});assert.ok(final.questions.some(q=>q.label===labels[2][1]));
+});
+test('screening meaning retains professional years zero through entry and final verification',async t=>{
+ const {page,dialog,options}=await setup(t);
+ await page.setContent('<div role="dialog"><label>How many years of professional experience do you have?<input name="years" type="number" required min="0"></label></div>');
+ const answers={'years of professional experience':0,'total years of experience':5},result=await fillApplicationFields(dialog,{...options,answers});
+ assert.equal(await dialog.locator('input[name=years]').inputValue(),'0');assert.deepEqual(result.questions,[]);assert.deepEqual(result.errors,[]);
+ const final=await verifyApplicationFields(dialog,{...options,answers});assert.deepEqual(final.questions,[]);assert.deepEqual(final.errors,[]);
+});
