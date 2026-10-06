@@ -545,5 +545,9 @@ recovery on this delivery. Read-only primary UI checks passed for attention,
 Answers/History links, lifecycle labels, 390px layout and continued idle state.
 No applicant answers were edited and no live applications were submitted.
 
-GitHub delivery, private-proof preservation and managed-worktree cleanup are
-verified separately before final completion.
+GitHub `main` was pushed and its remote revision matched delivered local HEAD.
+Private runtime data, diagnostics, backups, browser files and proof remain
+untracked. Synthetic verification screenshots, logs, the review and Native
+ledger were copied privately and checksum-verified before scratch cleanup.
+Only documentation/checklist changes followed the verified source commit.
+Phase 2 is delivered; Phase 3 remains paused for explicit user approval.
