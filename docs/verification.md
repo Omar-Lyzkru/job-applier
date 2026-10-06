@@ -530,4 +530,20 @@ Native rulings carried through delivery:
 - Production migration/restart/GitHub delivery are verified by the root before
   completion; cost if wrong: stored data or local/remote code could differ.
 
-Deferred minors: none. Production delivery evidence follows once verified.
+Deferred minors: none.
+
+Production integration: the clean primary `main` checkout was fast-forwarded to
+the verified branch. A private backup of config, answers, questions and history
+was created under ignored `data/backups/` before startup. The merged primary
+unit/API suite passed **199/199**. The app started idle at port 3210 without
+launching an application run.
+
+Startup comparisons confirm config and answers are byte-for-byte unchanged,
+historical identities/order and protected attempts are preserved, and questions
+match the documented full-history projection. No records needed lifecycle
+recovery on this delivery. Read-only primary UI checks passed for attention,
+Answers/History links, lifecycle labels, 390px layout and continued idle state.
+No applicant answers were edited and no live applications were submitted.
+
+GitHub delivery, private-proof preservation and managed-worktree cleanup are
+verified separately before final completion.
