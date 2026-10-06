@@ -1,4 +1,6 @@
 import test from 'node:test';
+import fsp from 'node:fs/promises';
+import {syncBuiltinESMExports} from 'node:module';
 import assert from 'node:assert/strict';
 import {mkdtemp, rm, writeFile, readFile, rename, mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -201,4 +203,18 @@ for(const after of [false,true])test(`failed write ${after?'after':'before'} res
 });
 test('legacy update cannot erase an attempted timestamp',async t=>{
  const {store}=await workStore(t),r=await store.createRecord(workJob(),'submission_pending');await assert.rejects(store.updateRecord(r.id,{attemptedAt:null}),/attempt|immutable/i);
+});
+
+
+test('post-rename directory sync failure cannot erase a reserved attempt during recovery',async t=>{
+ const {dir,store}=await workStore(t),r=await filling(store),originalOpen=fsp.open;let failSync=true;
+ fsp.open=async(...args)=>{const handle=await originalOpen(...args);if(args[0]===dir){const sync=handle.sync.bind(handle);handle.sync=async()=>{if(failSync){failSync=false;throw Object.assign(new Error('Synthetic directory fsync EIO'),{code:'EIO'});}return sync();};}return handle;};syncBuiltinESMExports();
+ try{
+  await assert.rejects(reserve(store,r),/directory fsync EIO/);
+  const disk=JSON.parse(await readFile(join(dir,'history.json'),'utf8'))[0];assert.equal(disk.status,'submission_pending');assert.ok(disk.attemptedAt);
+  const memory=(await store.getHistory())[0];assert.equal(memory.status,'submission_pending');assert.equal(memory.attemptedAt,disk.attemptedAt);
+  await store.recoverWork();const recovered=(await store.getHistory())[0];assert.equal(recovered.status,'unconfirmed');assert.equal(recovered.attemptedAt,disk.attemptedAt);
+  assert.equal(JSON.parse(await readFile(join(dir,'history.json'),'utf8'))[0].attemptedAt,disk.attemptedAt);await assert.rejects(reserve(store,recovered),/attempt|reserve|state/i);
+ }finally{fsp.open=originalOpen;syncBuiltinESMExports();}
+ await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());await reopened.recoverWork();assert.equal((await reopened.getHistory())[0].status,'unconfirmed');
 });

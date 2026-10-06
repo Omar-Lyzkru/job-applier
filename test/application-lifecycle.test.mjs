@@ -108,3 +108,12 @@ test('attention uses full history and active children prevent a second claim',()
   const item=projectAttention([record('a'),active],[question()],{answers:{relocate:false}})[0];
   assert.equal(item.singleRetry,false);assert.equal(item.readyForBatch,false);
 });
+
+
+test('rediscovery skips and dry runs cannot hide an uncertain reservation from full-history attention',()=>{
+ for(const status of ['skipped','ready']){
+  const uncertain=record('protected','unconfirmed',{attemptedAt:'2026-10-04T12:01:00Z',updatedAt:'2026-10-04T12:02:00Z',blockers:[makeBlocker('submission_uncertain')]});
+  const later=record('rediscovered',status),history=[uncertain,later,...Array.from({length:201},(_,i)=>record('other'+i,'skipped',{job:job(String(2000+i))}))];
+  const items=projectAttention(history,[],{});assert.equal(items.length,1);assert.equal(items[0].recordId,uncertain.id);assert.equal(items[0].status,'unconfirmed');assert.equal(items[0].updatedAt,uncertain.updatedAt);assert.equal(items[0].singleRetry,false);assert.equal(items[0].readyForBatch,false);assert.match(items[0].retryReason,/Check LinkedIn/);
+ }
+});

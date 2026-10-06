@@ -164,7 +164,18 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
       const headings=Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]')).filter(visible);
       const controls=Array.from(root.querySelectorAll('input,select,textarea,[role=combobox],[role=checkbox],[role=radiogroup],[role=listbox],[role=textbox],[contenteditable=true]')).filter(el=>visible(el)&&el.type!=='hidden');
       const actions=Array.from(root.querySelectorAll('button,[role=button]')).filter(el=>visible(el)&&/^(Next|Review|Continue)(?:\s|$)|^Submit application$/i.test(el.getAttribute('aria-label')||el.innerText));
-      return {headings:headings.map(el=>el.innerText.trim()),schema:controls.map(el=>[el.tagName,el.type,el.name,el.getAttribute('aria-label'),el.required]),actions:actions.map(el=>(el.getAttribute('aria-label')||el.innerText).trim()),generation:[root,...headings,...controls,...actions].map(token)};
+      const progress=Array.from(root.querySelectorAll('[role=progressbar]')).filter(visible).flatMap(bar=>{
+        const now=Number(bar.getAttribute('aria-valuenow'));
+        if(!bar.hasAttribute('aria-valuenow')||bar.getAttribute('aria-valuemin')!=='0'||bar.getAttribute('aria-valuemax')!=='100'||!Number.isFinite(now)||now<0||now>100)return [];
+        for(let area=bar.parentElement,depth=0;area&&area!==root&&depth<2;area=area.parentElement,depth++){
+          if(area.querySelector('input,select,textarea,button,[role=button],[role=combobox]')||area.querySelectorAll('[role=progressbar]').length!==1)break;
+          for(const label of area.querySelectorAll('p,span,div')){
+            if(label.children.length||!visible(label))continue;const match=label.textContent.trim().match(/^(\d+)\s*\/\s*(\d+)\s+pages?$/i);
+            if(!match)continue;const page=Number(match[1]),total=Number(match[2]);if(page>=1&&page<=total&&Math.abs(now-page/total*100)<=1)return [[page,total]];
+          }
+        }return [];
+      });
+      return {progress,headings:headings.map(el=>el.innerText.trim()),schema:controls.map(el=>[el.tagName,el.type,el.name,el.getAttribute('aria-label'),el.required]),actions:actions.map(el=>(el.getAttribute('aria-label')||el.innerText).trim()),generation:[root,...headings,...controls,...actions].map(token)};
     });return digest(structure);
   }
   async function applicationReady(page,signal){

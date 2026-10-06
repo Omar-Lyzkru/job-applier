@@ -237,7 +237,11 @@ export async function verifyApplicationFields(dialog,options={}){
  for(const entry of fields){
   checkStopped(options.signal);const f=entry.field;
   if(f.documentSelection){const matches=entry.radios?.filter(o=>state.resumeVerified&&o.label.includes(state.resumeName))||[];if(matches.length!==1||!await matches[0].locator.isChecked())add(f,'Could not verify the selected résumé','resume_upload');continue;}
-  if(f.type==='file'){if(/resume|résumé|\bcv\b/i.test(f.label)){if(!state.resumeVerified)add(f,'The selected résumé has not been verified','resume_upload');}else if(f.required||hasValue(f))add(f,'This upload needs a file the app does not have','unsupported_control');continue;}
+  if(f.type==='file'){if(/resume|résumé|\bcv\b/i.test(f.label)){const current=state.resumeVerified&&await entry.locator.evaluate((el,name)=>{
+      const area=el.closest('[data-applier-resume-region],.jobs-document-upload,.jobs-resume-upload,section,fieldset')||el.parentElement;
+      const matches=Array.from(area?.querySelectorAll('input[type=radio]')||[]).filter(radio=>[radio.getAttribute('aria-label')||'',...(radio.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.textContent||''),...Array.from(radio.labels||[]).map(label=>label.textContent)].some(label=>label.includes(name)));
+      return matches.length===1&&matches[0].checked;
+    },state.resumeName);if(!current)add(f,'The selected résumé has not been verified','resume_upload');}else if(f.required||hasValue(f))add(f,'This upload needs a file the app does not have','unsupported_control');continue;}
   if(identities.get(fieldIdentity(f))!==1){add(f,'More than one compatible field was found','form_changed');continue;}
   if(f.type==='unsupported'){if(f.required||hasValue(f))add(f,'This control is not supported automatically','unsupported_control');continue;}
   const answer=resolveAnswer({...f,company},options.profile||{},options.answers||{}),target=desired(entry,options);

@@ -96,12 +96,17 @@ export async function startFixture(scenario='success') {
       function step(n){
         let dialog=document.querySelector('[role=dialog],dialog');
         if(!dialog){dialog=document.createElement('div');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-label','Apply to Example');document.body.append(dialog);}
+        dialog.dataset.fixtureStep=String(n);
+        if(scenario==='reused-page-progress'&&n===2){
+          dialog.querySelector('.application-progress [role=progressbar]').setAttribute('aria-valuenow',String(2/3*100));dialog.querySelector('.application-progress p').textContent='2/3 pages';dialog.querySelector('[name=first]').value='';return;
+        }
         const close='<button aria-label="Dismiss" id="dismiss">×</button>';
         if(scenario==='limit'){dialog.innerHTML=close+'<p>You have reached the daily application limit. Please try again tomorrow.</p>';}
         else if(n===1)dialog.innerHTML=close+'<h2>Contact information</h2><label>First name<input name="first" required></label><label>Last name<input name="last" required></label><label>Email address<input name="email" type="email" required></label><label>Phone number<input name="phone" type="tel" required></label><label>Resume<input name="resume" type="file" accept=".pdf,.doc,.docx" required></label><label>Previous employer<textarea name="previous">Unknown company</textarea></label><button id="advance">Next</button>';
         else if(n===2 && scenario==='answer-memory')dialog.innerHTML=close+'<h2>Additional questions</h2><label>University name*<input name="school" required></label><label>Are you authorized to work legally in the US?*<select name="authorized" required><option value="">Choose</option><option value="1">Yes</option><option value="0">No</option></select></label><fieldset><legend>Will you now or anytime after graduation require sponsorship for a work visa (like an H1b) to work legally in the US?*</legend><label><input name="sponsorship" type="radio" value="1" required>Yes</label><label><input name="sponsorship" type="radio" value="0" required>No</label></fieldset><label>Do you consent to text message updates about your application?*<select name="sms" required><option value="">Choose</option><option value="1">Yes</option><option value="0">No</option></select></label><button id="advance">Review</button>';
         else if(n===2||n===3&&scenario==='identical-text-next')dialog.innerHTML=close+'<h2>Screening questions</h2><label>Years of Java experience<input name="years" type="number" required></label><label>Are you authorized to work in this country?<select name="authorized" required><option value="">Select an option</option><option value="1">Yes</option><option value="0">No</option></select></label><fieldset><legend>Are you willing to relocate?</legend><label><input type="radio" name="relocate" value="yes" required>Yes</label><label><input type="radio" name="relocate" value="no" required>No</label></fieldset><label><input name="consent" type="checkbox" required>I agree to share this information</label><label><input name="follow" type="checkbox" checked>Follow company</label><button id="advance">Review</button>';
         else dialog.innerHTML=close+'<h2>Review your application</h2><pre>'+escape(JSON.stringify(values))+'</pre><button id="submit">Submit application</button>';
+        if(scenario==='reused-page-progress'&&n===1)dialog.insertAdjacentHTML('afterbegin','<div class="application-progress"><div><svg width="100" height="4" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+(1/3*100)+'"><rect width="100" height="4"></rect></svg></div><p>1/3 pages</p></div>');
         if(['page-progress','page-progress-busy','upload-progress','indeterminate-progress','unrelated-page-counter'].includes(scenario)){
           const counter=scenario==='upload-progress'||scenario==='unrelated-page-counter'?'Uploading résumé':' '+n+'/5 pages';
           dialog.insertAdjacentHTML('afterbegin','<div class="application-progress"><div>'+n*20+' percent complete</div><div><svg width="100" height="4" role="progressbar" aria-valuemin="0" aria-valuemax="100"'+(scenario==='indeterminate-progress'?'':' aria-valuenow="'+n*20+'"')+'><rect width="100" height="4"></rect></svg></div><p>'+counter+'</p></div>');
@@ -137,12 +142,12 @@ export async function startFixture(scenario='success') {
         if(n===2 && scenario==='custom-listbox')dialog.querySelector('#advance').insertAdjacentHTML('beforebegin','<div role="listbox" aria-label="Citizenship" tabindex="0"><div role="option" aria-selected="true">Citizen<input type="text" value="citizen" style="display:none"></div></div>');
         if(n===2 && scenario==='custom-combobox')dialog.querySelector('#advance').insertAdjacentHTML('beforebegin','<div role="combobox" aria-label="Citizenship" tabindex="0" aria-expanded="false">Citizen<input type="hidden" value="citizen"></div>');
         dialog.querySelector('#dismiss').onclick=dismiss;
-        dialog.querySelector('#advance')?.addEventListener('click',async()=>{collect();await fetch('/events',{method:'POST',body:JSON.stringify({kind:'advance',step:n})});
-          if(n===2&&scenario==='ignored-next-always')return;
-          if(n===2&&scenario==='ignored-next-once'&&!ignoredSteps.has(n)){ignoredSteps.add(n);return;}
-          if(n===2&&scenario==='next-validation'){dialog.insertAdjacentHTML('beforeend','<p role="alert">Validation private-test-secret</p>');return;}
-          if(n===2&&scenario==='next-busy'){dialog.setAttribute('aria-busy','true');dialog.insertAdjacentHTML('beforeend','<p role="status">Loading</p>');return;}
-          if(scenario==='answer-memory' &&n===2)await fetch('/events',{method:'POST',body:JSON.stringify({kind:'review',fields:values})});step(n+1);});
+        dialog.querySelector('#advance')?.addEventListener('click',async()=>{const current=Number(dialog.dataset.fixtureStep);collect();await fetch('/events',{method:'POST',body:JSON.stringify({kind:'advance',step:current})});
+          if(current===2&&scenario==='ignored-next-always')return;
+          if(current===2&&scenario==='ignored-next-once'&&!ignoredSteps.has(current)){ignoredSteps.add(current);return;}
+          if(current===2&&scenario==='next-validation'){dialog.insertAdjacentHTML('beforeend','<p role="alert">Validation private-test-secret</p>');return;}
+          if(current===2&&scenario==='next-busy'){dialog.setAttribute('aria-busy','true');dialog.insertAdjacentHTML('beforeend','<p role="status">Loading</p>');return;}
+          if(scenario==='answer-memory' &&current===2)await fetch('/events',{method:'POST',body:JSON.stringify({kind:'review',fields:values})});step(current+1);});
         dialog.querySelector('#submit')?.addEventListener('click',async(event)=>{
           event.target.disabled=true;
           await fetch('/events',{method:'POST',body:JSON.stringify({kind:'submit',fields:values})});

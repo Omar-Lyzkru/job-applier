@@ -30,9 +30,14 @@ export function projectQuestions(history,rawQuestions){
 export function projectAttention(history,rawQuestions,{profile={},answers={}}={}){
   const questions=projectQuestions(history,rawQuestions),latest=latestJobs(history),groups=new Map();
   for(const q of questions){const id=String(q.jobId??'');const list=groups.get(id)||[];list.push(q);groups.set(id,list);}
+  const uncertainRecords=new Map();
+  for(const record of history){
+    if(['submission_pending','unconfirmed'].includes(record.status))uncertainRecords.set(idOf(record),record);
+    else if(record.status==='submitted')uncertainRecords.delete(idOf(record));
+  }
   const ids=new Set([...latest.keys(),...groups.keys()]),items=[];
   for(const id of ids){
-    const record=latest.get(id),pending=groups.get(id)||[];
+    const record=uncertainRecords.get(id)||latest.get(id),pending=groups.get(id)||[];
     if(!pending.length&&!attentionStates.has(record?.status))continue;
     if(verified(record))continue;
     const job=record?.job||{id,title:'Job details unavailable',company:''};

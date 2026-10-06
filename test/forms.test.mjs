@@ -416,3 +416,8 @@ test('read-only final verification detects a new required field and a changed se
  const {page,dialog,options}=await setup(t);await fillApplicationFields(dialog,options);await dialog.locator('#old-document').check();assert.equal((await verifyApplicationFields(dialog,options)).ok,false);
  await page.evaluate(()=>document.querySelector('[role=dialog]').insertAdjacentHTML('beforeend','<label>New required*<input required></label>'));const verify=await verifyApplicationFields(dialog,options);assert.ok(verify.questions.some(q=>q.label==='New required*'));assert.equal(await dialog.locator('input:not([type=radio])').inputValue(),'');
 });
+
+
+test('final readiness rejects disappearing document choices while the resume region remains',async t=>{
+ const {page,dialog,options}=await setup(t);assert.deepEqual(await fillApplicationFields(dialog,options),{questions:[],errors:[]});await page.evaluate(()=>document.querySelectorAll('#resume-region input[type=radio]').forEach(el=>el.remove()));const verified=await verifyApplicationFields(dialog,options);assert.equal(verified.ok,false);assert.ok(verified.blockers.some(b=>b.code==='resume_upload'));
+});

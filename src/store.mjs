@@ -54,6 +54,9 @@ export async function createStore(dataDir) {
       await file.writeFile(JSON.stringify(value,null,2)+'\n');
       await file.sync(); await file.close(); file=null;
       await rename(temp,path);
+      // Rename committed the visible file. Even if the directory sync fails,
+      // later recovery must use that truth and never overwrite a reservation.
+      state[name]=value;
       const directory=await open(dataDir,'r');
       try { await directory.sync(); } finally { await directory.close(); }
     } finally {
@@ -66,7 +69,6 @@ export async function createStore(dataDir) {
     const action=queue.then(async()=> {
       const next=update(clone(state[name]));
       await persist(name,next);
-      state[name]=next;
       return clone(next);
     });
     queue=action.catch(()=>{});
@@ -150,7 +152,7 @@ export async function createStore(dataDir) {
     async reconcileQuestions(){
       // Queue the comparison with prior writes, but avoid touching a no-change file.
       ensureOpen();let result;
-      const action=queue.then(async()=>{result=projectQuestions(state.history,state.questions);if(JSON.stringify(result)!==JSON.stringify(state.questions)){await persist('questions',result);state.questions=result;}return clone(result);});
+      const action=queue.then(async()=>{result=projectQuestions(state.history,state.questions);if(JSON.stringify(result)!==JSON.stringify(state.questions)){await persist('questions',result);}return clone(result);});
       queue=action.catch(()=>{});return action;
     },
     async recoverWork(){
@@ -159,7 +161,7 @@ export async function createStore(dataDir) {
         const at=new Date().toISOString(),next=state.history.map(record=>{
           const pending=record.status==='submission_pending',active=record.lifecycleVersion===1&&inflight.has(record.status);if(!pending&&!active)return clone(record);
           return {...record,status:pending?'unconfirmed':'interrupted',...(pending?{attemptedAt:record.attemptedAt||record.startedAt}:{}),finishedAt:at,reason:pending?'The app restarted before submission confirmation. Check this job in LinkedIn; it will not be retried automatically.':'The app restarted before submission. Retry explicitly to continue.',...(record.lifecycleVersion===1?{revision:record.revision+1,updatedAt:at,blockers:pending?[makeBlocker('submission_uncertain',{phase:record.phase})]:record.blockers}: {})};
-        });await persist('history',next);state.history=next;
+        });await persist('history',next);
       });queue=action.catch(()=>{});await action;await store.reconcileQuestions();
     },
     async recoverPending(){return store.recoverWork();}

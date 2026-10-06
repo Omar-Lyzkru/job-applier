@@ -456,3 +456,9 @@ test('diagnostic only exposes sanitized known record snapshots and rejects arbit
   const code=await new Promise((resolveCode,reject)=>{const req=request(app.url,{path:'/api/diagnostic/'+path,headers},res=>{res.resume();resolveCode(res.statusCode);});req.on('error',reject);req.end();});assert.equal(code,400,path);
  }
 });
+
+
+test('rediscovered uncertain work remains counted and guarded beyond displayed history',async t=>{
+ const {store,app,send}=await setup(t,{retry:true}),uncertain=await store.createRecord(attentionJob(9900),'unconfirmed');await store.updateRecord(uncertain.id,{attemptedAt:new Date().toISOString()});await store.createRecord(attentionJob(9900),'skipped');
+ for(let i=0;i<201;i++)await store.createRecord(attentionJob(10000+i),'skipped');const data=await (await fetch(app.url+'/api/bootstrap')).json();assert.equal(data.history.some(r=>r.id===uncertain.id),false);assert.equal(data.attentionCounts.unconfirmed,1);assert.equal(data.attention[0].recordId,uncertain.id);assert.equal((await send('/api/retry',{recordIds:[uncertain.id]})).status,409);
+});
