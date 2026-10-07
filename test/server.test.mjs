@@ -485,3 +485,24 @@ test('screening explanations reflect actual resolution without changing durable 
  const common=data.answerMemory.commonQuestions.find(q=>q.key==='degree type');assert.equal(common.description.screening.qualifiers.educationStatus,'current');assert.equal(common.screeningExplanation.decision,'confirmation_required');
  assert.deepEqual(await Promise.all([store.getConfig(),store.getAnswers(),store.getQuestions(),store.getHistory()]),before);assert.deepEqual(commands,[]);
 });
+
+
+test('answer status separates saved entry failures from unanswered information without changing history',async t=>{
+ const {store,app,send,commands}=await setup(t);
+ await store.createRecord({id:'9901',title:'Fixture role',company:'Example'},'needs_answer');
+ const radio={key:'evening work',label:'Evening work?',type:'radio',required:true,options:[{label:'Yes',value:'y'},{label:'No',value:'n'}],jobId:'9901',blocker:'operational',reason:'Selection timed out'};
+ const numeric={key:'years of rust experience',label:'Years of Rust experience',type:'number',jobId:'9901',blocker:'operational',reason:'Entry failed'};
+ await store.saveQuestions([radio,numeric,{key:'manual',label:'Manual control',type:'unsupported',jobId:'9901',blocker:'operational'}]);
+ const history=await store.getHistory(),questions=await store.getQuestions();
+ const read=async()=>await (await fetch(app.url+'/api/bootstrap')).json();
+ assert.equal((await send('/api/answers',{'evening work':false,'years of rust experience':0})).status,200);
+ const after=await read();
+ assert.deepEqual(after.answerStatusCounts,{needsAnswer:0,savedRetry:2,manual:1});
+ assert.deepEqual(after.questions.map(q=>q.answerStatus),['saved_retry','saved_retry','manual']);
+ assert.deepEqual(after.attention[0].answerProgress,{answered:2,unanswered:1,manual:true});
+ assert.equal(after.attention[0].status,'needs_answer');
+ assert.deepEqual(await store.getHistory(),history);assert.deepEqual(await store.getQuestions(),questions);assert.deepEqual(commands,[]);
+ // A changed choice stays unresolved rather than being marked saved.
+ await store.saveQuestions([{...radio,options:[{label:'Weekdays only',value:'w'}]}]);
+ const incompatible=await read();assert.equal(incompatible.questions[0].answerStatus,'needs_answer');assert.equal(incompatible.answerStatusCounts.needsAnswer,1);
+});

@@ -436,7 +436,7 @@ test('browser: grouped repeats have one editor, all job details, distinct counts
   const {store,page}=await answerMemoryPage(t,{questions:[repeatQuestion,second],employers:['First employer','Second employer']});
   const pending=page.locator('#pending-questions'),card=pending.locator('.pending-question');
   assert.equal(await card.count(),1);assert.equal(await pending.getByLabel('Answer for Evening work?',{exact:true}).count(),1);
-  assert.equal(await page.locator('#question-count').textContent(),'1');assert.match(await page.locator('#question-summary').textContent(),/1 question.*2 applications/);
+  assert.equal(await page.locator('#question-count').textContent(),'1');assert.match(await page.locator('#question-summary').textContent(),/1 need an answer.*2 applications/);
   await card.locator('.affected-applications > summary').click();assert.equal(await card.locator('a[href*="/jobs/view/"]').count(),2);
   assert.match(await card.textContent(),/Selection timed out/);assert.match(await card.textContent(),/Read-only answer differs/);
   await card.getByLabel('Answer for Evening work?',{exact:true}).selectOption('No');await card.getByRole('button',{name:'Save this answer',exact:true}).click();await page.getByText('Answer saved',{exact:true}).waitFor();
@@ -741,4 +741,61 @@ test('browser: screening explanation shows safe sources and preserves drafts thr
  const otherCard=page.locator('.pending-question').filter({has:page.getByRole('heading',{name:other.label,exact:true})});await draft.fill('x'.repeat(10001));await otherCard.getByRole('button',{name:'Save this answer',exact:true}).click();await page.getByText('Answer is too long',{exact:true}).waitFor();assert.equal(await draft.inputValue(),'x'.repeat(10001));assert.equal((await store.getAnswers())['why this company'],'Original');
  assert.equal(await page.locator('#pending-questions img').count(),0);assert.equal(await page.evaluate(()=>window.injected),undefined);assert.deepEqual(starts,[]);assert.deepEqual(await store.getHistory(),[]);
  await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/screening-explanations-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve('test-artifacts/screening-explanations-mobile.png'),fullPage:true});
+});
+
+
+test('browser: theme switch persists, preserves answer drafts and fits all mobile views',async t=>{
+ const {page,store}=await answerMemoryPage(t,{questions:[{key:'why us',label:'Why us?',type:'text',jobId:'1001',blocker:'missing_answer'}]});
+ const input=page.getByLabel('Answer for Why us?',{exact:true});await input.fill('Keep this unsaved draft');
+ const light=await page.locator('html').evaluate(el=>getComputedStyle(el).backgroundColor);
+ await page.getByRole('button',{name:'Dark mode',exact:true}).click();
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+ assert.notEqual(await page.locator('html').evaluate(el=>getComputedStyle(el).backgroundColor),light);
+ const contrast=await page.locator('.stat-card').first().evaluate(el=>{
+  const luminance=rgb=>{const c=rgb.match(/\d+/g).slice(0,3).map(n=>Number(n)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return .2126*c[0]+.7152*c[1]+.0722*c[2];};
+  const surface=luminance(getComputedStyle(el).backgroundColor),text=luminance(getComputedStyle(el.querySelector('.stat-value')).color);
+  return {surface,ratio:(Math.max(surface,text)+.05)/(Math.min(surface,text)+.05)};
+ });
+ assert.ok(contrast.surface<.1,'Dark cards must use a dark surface');assert.ok(contrast.ratio>=4.5,'Card text must remain readable');
+ assert.equal(await input.inputValue(),'Keep this unsaved draft');assert.deepEqual(await store.getAnswers(),{});
+ await page.reload();await page.getByRole('button',{name:'Light mode',exact:true}).waitFor();
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+ await mkdir(resolve('test-artifacts'),{recursive:true});
+ await page.screenshot({path:resolve('test-artifacts/theme-dark-desktop.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ for(const name of ['Settings','Answers','History','Dashboard']){
+  await page.getByRole('button',{name,exact:true}).click();
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ }
+ await page.screenshot({path:resolve('test-artifacts/theme-dark-mobile.png'),fullPage:true});
+ const toggle=page.getByRole('button',{name:'Light mode',exact:true});await toggle.focus();await page.keyboard.press('Space');
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+ await page.reload();assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+});
+
+test('browser: theme switch still works when preference storage is unavailable',async t=>{
+ const {page}=await settingsPage(t);
+ await page.addInitScript(()=>{Object.defineProperty(Storage.prototype,'getItem',{value(){throw new Error('Storage unavailable');}});Object.defineProperty(Storage.prototype,'setItem',{value(){throw new Error('Storage unavailable');}});});
+ await page.reload();await page.getByRole('button',{name:'Dark mode',exact:true}).click();
+ assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+ await page.getByRole('button',{name:'Settings',exact:true}).click();assert.equal(await page.getByLabel('First name',{exact:true}).isEnabled(),true);
+});
+
+test('browser: saving an answer clears unanswered counts while retaining retry and manual blockers',async t=>{
+ const {page,store,commands,records}=await attentionPage(t);
+ await page.getByRole('button',{name:'Answers',exact:true}).click();
+ const before=await store.getHistory();
+ const card=page.locator('.pending-question').filter({has:page.getByRole('heading',{name:'Evening work?',exact:true})});
+ await card.getByLabel('Answer for Evening work?',{exact:true}).selectOption('No');
+ await card.getByRole('button',{name:'Save this answer',exact:true}).click();await page.getByText('Answer saved',{exact:true}).waitFor();
+ assert.equal(await page.locator('#pending-count').textContent(),'0');
+ await page.getByRole('heading',{name:'Answer saved — retry needed',exact:true}).waitFor();
+ assert.match(await card.textContent(),/Saved answer: No/);
+ await page.getByRole('button',{name:'Dashboard',exact:true}).click();
+ const attention=page.locator(`[data-record-id="${records.operational.id}"]`);
+ assert.match(await attention.locator('.attention-context').textContent(),/Answer saved.*retry needed/);
+ assert.doesNotMatch(await attention.locator('.attention-context').textContent(),/Needs answer/);
+ assert.equal(await attention.getByRole('button',{name:'Retry application',exact:true}).isVisible(),true);
+ await page.reload();assert.equal(await page.locator('#pending-count').textContent(),'0');
+ assert.deepEqual(await store.getHistory(),before);assert.equal((await store.getAnswers())['evening work'],'No');assert.deepEqual(commands,[]);
 });

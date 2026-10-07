@@ -88,6 +88,7 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
           const resolution=resolveAnswer(question,config.profile,answers);
           question.screeningExplanation=explainScreeningResolution(question,resolution);
           question.resolutionReason=resolution.reason||'';
+          question.answerStatus=question.type==='unsupported'||resolution.manual||(question.type==='checkbox'&&question.required&&resolution.kind==='fill'&&resolution.value===false)?'manual':resolution.kind==='fill'?'saved_retry':'needs_answer';
           question.suggestions=resolution.suggestions||[];
           if(resolution.kind==='fill')question.savedAnswer={answer:resolution.answer,displayAnswer:resolution.optionLabel??resolution.value,sourceQuestion:resolution.sourceQuestion,match:resolution.match,source:resolution.source};
           if(resolution.manual){question.type='unsupported';question.blocker='operational';question.reason=resolution.reason;}
@@ -115,12 +116,14 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
         const answerMemory={commonQuestions:prepared,employers,smsAnswers,reusedAnswers:[...uniqueReuse.values()].slice(-40)};
         const intelligenceOptions={families:roleFamilyPresets,skills:skillVocabulary.map(([label])=>({id:canonicalSkill(label),label}))};
         const questionGroups=groupPendingQuestions(questions);
+        const answerStatusCounts={needsAnswer:0,savedRetry:0,manual:0};
+        for(const group of questionGroups)answerStatusCounts[({needs_answer:'needsAnswer',saved_retry:'savedRetry',manual:'manual'})[group.question.answerStatus]]++;
         const jobIds=new Set(questions.map(question=>String(question.jobId??'').trim()).filter(id=>id&&!['unknown','undefined','null'].includes(id.toLowerCase())));
         const questionCounts={distinctQuestions:questionGroups.length,affectedApplications:jobIds.size,occurrences:questions.length};
         const attention=projectAttention(history,pending,{profile:config.profile,answers});
         const attentionCounts={total:attention.length,ready:attention.filter(item=>item.readyForBatch).length,manual:attention.filter(item=>item.blockers.some(blocker=>blockerPolicy(blocker.code).manual)).length,interrupted:attention.filter(item=>item.status==='interrupted').length,unconfirmed:attention.filter(item=>['unconfirmed','submission_pending'].includes(item.status)).length};
         const displayed=history.map((record,index)=>({record,index,time:Date.parse(record.updatedAt||record.finishedAt||record.startedAt)||0})).sort((a,b)=>b.time-a.time||b.index-a.index).slice(0,200).map(({record})=>record);
-        send({config,answers,questions,questionGroups,questionCounts,answerMemory,intelligenceOptions,attention,attentionCounts,history:displayed,status:await status(),readiness:readiness(config),token});return;
+        send({config,answers,questions,questionGroups,questionCounts,answerStatusCounts,answerMemory,intelligenceOptions,attention,attentionCounts,history:displayed,status:await status(),readiness:readiness(config),token});return;
       }
       if(req.method==='GET' && path==='/api/status'){send(await status());return;}
       if(req.method==='GET' && path==='/api/history.csv'){
@@ -170,7 +173,7 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
       }
       if(req.method==='POST' && path==='/api/stop'){await readJson(req);await runner.stop();send(await status());return;}
       if(req.method==='POST' && path==='/api/browser'){await readJson(req);await runner.openBrowser();send(await status());return;}
-      const staticFiles={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/locations.js':'locations.js','/styles.css':'styles.css'};
+      const staticFiles={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/theme.js':'theme.js','/locations.js':'locations.js','/styles.css':'styles.css'};
       if(req.method==='GET' && Object.hasOwn(staticFiles,path)){
         const file=join(root,'public',staticFiles[path]);
         const types={'.html':'text/html','.js':'text/javascript','.css':'text/css'};

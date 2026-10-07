@@ -17,6 +17,11 @@ function setView(next){
   document.querySelectorAll('.nav-item').forEach(button=>{const active=button.dataset.view===view;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
   byId('page-title').textContent=pageCopy[view][0];byId('page-subtitle').textContent=pageCopy[view][1];document.title=`Job Applier · ${view[0].toUpperCase()+view.slice(1)}`;
 }
+const themeToggle=byId('theme-toggle');
+function syncThemeToggle(){const dark=document.documentElement.dataset.theme==='dark';themeToggle.textContent=dark?'Light mode':'Dark mode';themeToggle.setAttribute('aria-label',dark?'Light mode':'Dark mode');}
+syncThemeToggle();
+themeToggle.addEventListener('click',()=>{window.jobApplierTheme.toggle();syncThemeToggle();});
+
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>setView(button.dataset.view)));
 function toast(message,error=false){
   clearTimeout(toastTimer);const box=byId('toast');box.textContent=message;box.classList.toggle('error',error);box.hidden=false;toastTimer=setTimeout(()=>{box.hidden=true;},5000);
@@ -269,11 +274,13 @@ function renderAttention(){
     let validUrl=false;try{const parsed=new URL(url);validUrl=parsed.protocol==='https:'&&(parsed.hostname==='linkedin.com'||parsed.hostname.endsWith('.linkedin.com'));}catch{}
     const title=create(validUrl?'a':'span',null,item.job.title||'Job details unavailable');
     if(validUrl){title.href=url;title.target='_blank';title.rel='noopener noreferrer';}heading.append(title);card.append(heading);
-    card.append(create('p','attention-context',`${item.job.company||'Employer unavailable'} · ${resultNames[item.status]||'Needs attention'} · ${String(item.phase||'unknown').replaceAll('_',' ')}`));
+    const progress=item.answerProgress;
+    const currentLabel=progress?.manual?'Manual completion needed':progress?.answered>0&&progress.unanswered===0?'Answer saved — retry needed':resultNames[item.status]||'Needs attention';
+    card.append(create('p','attention-context',`${item.job.company||'Employer unavailable'} · ${currentLabel} · ${String(item.phase||'unknown').replaceAll('_',' ')}`));
     const updated=new Date(item.updatedAt),timestamp=create('time','attention-updated');
     if(item.updatedAt&&!Number.isNaN(updated.getTime())){timestamp.dateTime=updated.toISOString();timestamp.textContent=`Updated ${new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:state.config.timezone}).format(updated)}`;}else timestamp.textContent='Update time unavailable';
     card.append(timestamp);
-    for(const blocker of item.blockers||[])card.append(create('p','attention-blocker',blocker.summary));
+    for(const blocker of item.blockers||[])card.append(create('p','attention-blocker',blocker.code==='missing_answer'&&progress?.unanswered===0?'Previous missing answers are saved. Retry to check the live form.':blocker.summary));
     card.append(create('p','attention-reason',item.retryReason));
     const actions=create('div','attention-actions');
     if(item.questions?.length){
@@ -419,7 +426,8 @@ function renderQuestions(){
   const counts=new Map();for(const group of groups)counts.set(group.draftId,(counts.get(group.draftId)||0)+1);
   for(const [draftId,count] of counts)if(count>1&&(pendingGroupCounts.get(draftId)||0)<=1)for(const draft of pendingDrafts.get(draftId)||[])delete draft.targetGroupId;
   pendingGroupCounts=counts;
-  const fragment=document.createDocumentFragment();
+  const fragment=document.createDocumentFragment(),sections=new Map();
+  for(const [kind,title] of [['needs_answer','Needs an answer'],['saved_retry','Answer saved — retry needed'],['manual','Manual completion needed']]){const section=create('section','answer-status-section');section.append(create('h2',null,title));sections.set(kind,section);}
   for(const group of groups){
     const question=group.question;
     const card=create('article','pending-question');card.append(create('h3',null,question.label));
@@ -440,8 +448,9 @@ function renderQuestions(){
       if(occurrence.blocker)item.append(create('p','question-blocker',occurrence.blocker==='missing_answer'?'Waiting for your answer':'LinkedIn entry needs attention'));
       details.append(item);
     }
-    card.append(details);fragment.append(card);
+    card.append(details);sections.get(question.answerStatus||'needs_answer').append(card);
   }
+  for(const section of sections.values())if(section.querySelector('.pending-question'))fragment.append(section);
   byId('pending-questions').replaceChildren(fragment);byId('questions-empty').hidden=groups.length>0;renderRetainedDrafts(groups);
 }
 function renderCommonQuestions(){
@@ -499,8 +508,9 @@ function render(){
   const config=state.config,status=state.status,active=['running','stopping'].includes(status.state);
   byId('today-count').textContent=status.todayCount;byId('daily-cap').textContent=`/ ${config.dailyCap}`;byId('daily-progress').max=config.dailyCap;byId('daily-progress').value=status.todayCount;
   const counts=state.questionCounts||{distinctQuestions:state.questions.length,affectedApplications:0};
-  byId('confirmed-count').textContent=status.confirmedToday||0;byId('pending-count').textContent=counts.distinctQuestions;byId('question-count').textContent=counts.distinctQuestions;byId('question-count').hidden=counts.distinctQuestions===0;
-  byId('question-summary').textContent=`${counts.distinctQuestions} ${counts.distinctQuestions===1?'question':'questions'} across ${counts.affectedApplications} ${counts.affectedApplications===1?'application':'applications'}`;
+  const progress=state.answerStatusCounts||{needsAnswer:counts.distinctQuestions,savedRetry:0,manual:0};
+  byId('confirmed-count').textContent=status.confirmedToday||0;byId('pending-count').textContent=progress.needsAnswer;byId('question-count').textContent=progress.needsAnswer;byId('question-count').hidden=progress.needsAnswer===0;
+  byId('question-summary').textContent=`${progress.needsAnswer} need an answer · ${progress.savedRetry} saved, retry needed · ${progress.manual} need manual completion · across ${counts.affectedApplications} ${counts.affectedApplications===1?'application':'applications'}`;
   byId('state-badge').className=`state-badge ${status.state}`;
   const names={idle:state.readiness.length?'Setup needed':'Ready',running:'Applying',stopping:'Stopping',paused:'Paused',failed:'Needs attention'};
   byId('state-label').textContent=names[status.state]||'Ready';

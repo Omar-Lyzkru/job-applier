@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Job Applier</title><link rel="stylesheet" href="/styles.css"><script src="/app.js" type="module"></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Job Applier</title><script src="/theme.js"></script><link rel="stylesheet" href="/styles.css"><script src="/app.js" type="module"></script></head>
 <body>
   <aside class="sidebar">
     <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 19 14-14M7 5h12v12"/></svg></span><span>Job Applier<small>Your next chapter.</small></span></a>
@@ -11,6 +11,7 @@
       <button class="nav-item" data-view="answers"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11a8 8 0 0 1-8 8H6l-4 3V11a8 8 0 0 1 8-8h3a8 8 0 0 1 8 8Z"/><path d="M7 9h10M7 13h6"/></svg>Answers<span id="question-count" class="nav-badge" aria-hidden="true" hidden>0</span></button>
       <button class="nav-item" data-view="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v15H4zM8 2v6M16 2v6M4 10h16M8 14h3M8 17h6"/></svg>History</button>
     </nav>
+    <button id="theme-toggle" class="button theme-toggle" type="button" aria-label="Dark mode">Dark mode</button>
     <div class="sidebar-footer"><span class="platform-mark">in</span><div>LinkedIn Easy Apply<small>Runs on your computer</small></div><span class="local-dot" aria-label="Local app"></span></div>
   </aside>
   <main>
@@ -59,7 +60,7 @@
     </section>
 
     <section id="answers-view" class="view" hidden>
-      <article class="panel form-panel"><div class="panel-heading"><div><h2>Questions waiting for you</h2><p id="question-summary"></p><button type="button" class="text-button" data-attention-link>View applications needing attention</button><p>Compatible repeats share one editor. Expand affected applications to see every question and failure. Save answers before starting a run.</p></div></div><div id="retained-question-drafts" hidden></div><div id="pending-questions"></div><p id="questions-empty" class="quiet-empty">No questions waiting. New screening questions will appear here.</p></article>
+      <article class="panel form-panel"><div class="panel-heading"><div><h2>Your application questions</h2><p id="question-summary"></p><button type="button" class="text-button" data-attention-link>View applications needing attention</button><p>Compatible repeats share one editor. Expand affected applications to see every question and failure. Save answers before starting a run.</p></div></div><div id="retained-question-drafts" hidden></div><div id="pending-questions"></div><p id="questions-empty" class="quiet-empty">No questions waiting. New screening questions will appear here.</p></article>
       <details class="panel common-questions"><summary><span>Common questions</span><small>Answer these before a run. Saved answers can fill equivalent questions.</small></summary><div id="common-questions"></div><p id="common-questions-empty" class="quiet-empty" hidden>No common questions available.</p></details>
       <section class="panel form-panel" aria-labelledby="sms-heading"><div class="panel-heading"><div><h2 id="sms-heading">Text messages from employers</h2><p>Choose separately for each employer. Consent is never carried to a different employer.</p></div></div><div class="answer-form"><div class="answer-row sms-row"><div class="field answer-field"><label for="sms-employer">Employer for text messages</label><select id="sms-employer"><option value="">Choose an employer</option></select></div><div class="field answer-field"><label for="sms-consent">Text message consent</label><select id="sms-consent"><option value="">Choose an answer</option><option value="Yes">Yes</option><option value="No">No</option></select></div></div><p id="sms-status" class="answer-memory-help">Select an employer to review or save your choice.</p><button id="save-sms-consent" class="button primary answer-action" type="button">Save text message consent</button></div></section>
       <section class="panel form-panel" aria-labelledby="recognized-heading"><div class="panel-heading"><div><h2 id="recognized-heading">Recognized saved answers</h2><p>These saved answers can fill equivalent questions in a future attempt. The original question is shown below.</p></div></div><div id="recognized-answers"></div><p id="recognized-empty" class="quiet-empty">Matching saved answers for current questions will appear here.</p></section>

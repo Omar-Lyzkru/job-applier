@@ -55,7 +55,7 @@ export function projectAttention(history,rawQuestions,{profile={},answers={}}={}
     const singleRetry=Boolean(record&&/^\d+$/.test(id)&&!uncertain&&!processing&&!unsafe&&!missing);
     const readyForBatch=singleRetry&&!operational&&(pending.length>0?blockers.every(b=>b.code==='missing_answer'):record.status==='interrupted'&&blockers.every(b=>b.code==='navigation'));
     const retryReason=uncertain?'A submitted or uncertain attempt exists. Check LinkedIn.':processing?'This application is already queued or being processed.':unsafe?'Complete this control directly in LinkedIn.':missing?'Save the missing required answers first.':!record?'Job details are unavailable; targeted retry is not possible.':!pending.length&&record.status!=='interrupted'?'Earlier blocker details are unknown; retry to inspect.':readyForBatch?'Ready for an explicit retry.':'Retry this application to check its form again.';
-    items.push({recordId:record?.id||null,revision:record?.revision||0,job:structuredClone(job),phase:record?.phase||'unknown',status:record?.status||'needs_attention',blockers,questions:pending,singleRetry,readyForBatch,retryReason,updatedAt:record?.updatedAt||record?.finishedAt||record?.startedAt||null});
+    items.push({recordId:record?.id||null,revision:record?.revision||0,job:structuredClone(job),phase:record?.phase||'unknown',status:record?.status||'needs_attention',blockers,questions:pending,answerProgress:{answered:resolutions.filter(r=>r.kind==='fill').length,unanswered:resolutions.filter(r=>r.kind!=='fill').length,manual:unsafe},singleRetry,readyForBatch,retryReason,updatedAt:record?.updatedAt||record?.finishedAt||record?.startedAt||null});
   }
   return items;
 }
