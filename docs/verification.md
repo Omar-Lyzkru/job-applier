@@ -666,3 +666,17 @@ real employer forms may still need manual completion); production-state
 preservation is owned by delivery checks (cost: a missed comparison could hide
 state or deployed-code drift). No live application or real applicant answer
 was changed by testing. Delivery proof is kept privately under data/verification.
+
+
+Fix delivery: primary main was fast-forwarded and GitHub matched `693d612`.
+The app was gracefully restarted only after an idle/no-in-flight check and a
+verified private backup. Config, answers, questions and all 357 history records
+are byte-for-byte unchanged. Read-only bootstrap reports zero unanswered groups,
+five saved groups needing an entry retry, no manual groups and zero startup run
+attempts. Earlier verification expected six groups from the historical 3A note;
+inspection confirmed five current groups, so startup proof records actual data.
+No real answer or application was changed. Test/review logs and synthetic
+screenshots were privately copied and checksum-verified before workspace cleanup.
+
+The user requested Phase 3B continuation after these fixes. Its detailed plan is
+written for review; no 3B implementation, bank creation or migration has begun.
