@@ -799,3 +799,35 @@ test('browser: saving an answer clears unanswered counts while retaining retry a
  await page.reload();assert.equal(await page.locator('#pending-count').textContent(),'0');
  assert.deepEqual(await store.getHistory(),before);assert.equal((await store.getAnswers())['evening work'],'No');assert.deepEqual(commands,[]);
 });
+
+test('browser: dark save confirmations and rejected-save messages remain readable',async t=>{
+ const question={key:'why us',label:'Why us?',type:'text',jobId:'1001',blocker:'operational',reason:'Entry failed'};
+ const {page}=await answerMemoryPage(t,{questions:[question]});
+ await page.getByRole('button',{name:'Dark mode',exact:true}).click();
+ const card=page.locator('.pending-question'),input=card.getByLabel('Answer for Why us?',{exact:true});
+ for(const [value,message] of [['A clear answer','Answer saved'],['x'.repeat(10001),'Answer is too long']]){
+  await input.fill(value);await card.getByRole('button',{name:'Save this answer',exact:true}).click();await page.getByText(message,{exact:true}).waitFor();
+  const ratio=await page.locator('#toast').evaluate(el=>{
+   const lum=rgb=>{const c=rgb.match(/\d+/g).slice(0,3).map(n=>Number(n)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return .2126*c[0]+.7152*c[1]+.0722*c[2];};
+   const style=getComputedStyle(el),a=lum(style.color),b=lum(style.backgroundColor);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+  });assert.ok(ratio>=4.5,`${message} must be readable in dark mode`);
+ }
+});
+
+test('browser: saved answers never obscure uncertain, active or duplicate-protected application status',async t=>{
+ const {page,store,records,commands}=await attentionPage(t);
+ const job=id=>({id:String(id),title:`Guarded fixture ${id}`,company:'Fixture employer',url:`https://www.linkedin.com/jobs/view/${id}/`});
+ const reserved=await store.createRecord(job(3310),'submission_pending');
+ const queued=await store.createWork(job(3311));
+ await store.createRecord(job(3312),'submitted');const duplicate=await store.createRecord(job(3312),'needs_answer');
+ const base={key:'evening work',label:'Evening work?',type:'radio',options:[{label:'Yes',value:'y'},{label:'No',value:'n'}],required:true,blocker:'missing_answer'};
+ await store.saveQuestions([...(await store.getQuestions()),...['3303','3310','3311','3312'].map(jobId=>({...base,jobId}))]);
+ await store.saveAnswers({'evening work':'No','years of rust experience':0});await page.reload();
+ for(const [record,label] of [[records.uncertain,'Unconfirmed'],[reserved,'Submission pending'],[queued,'Queued'],[duplicate,'Needs attention']]){
+  const card=page.locator(`[data-record-id="${record.id}"]`);await card.waitFor();
+  assert.match(await card.locator('.attention-context').textContent(),new RegExp(label));
+  assert.doesNotMatch(await card.textContent(),/Answer saved — retry needed|Retry to check the live form/);
+  assert.equal(await card.getByRole('button',{name:'Retry application',exact:true}).count(),0);
+ }
+ assert.deepEqual(commands,[]);
+});

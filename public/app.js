@@ -275,12 +275,13 @@ function renderAttention(){
     const title=create(validUrl?'a':'span',null,item.job.title||'Job details unavailable');
     if(validUrl){title.href=url;title.target='_blank';title.rel='noopener noreferrer';}heading.append(title);card.append(heading);
     const progress=item.answerProgress;
-    const currentLabel=progress?.manual?'Manual completion needed':progress?.answered>0&&progress.unanswered===0?'Answer saved — retry needed':resultNames[item.status]||'Needs attention';
+    const answerLabel=progress?.manual?'Manual completion needed':progress?.answered>0&&progress.unanswered===0?(item.singleRetry?'Answer saved — retry needed':'Needs attention'):null;
+    const currentLabel=item.status==='needs_answer'?(answerLabel||resultNames[item.status]):resultNames[item.status]||'Needs attention';
     card.append(create('p','attention-context',`${item.job.company||'Employer unavailable'} · ${currentLabel} · ${String(item.phase||'unknown').replaceAll('_',' ')}`));
     const updated=new Date(item.updatedAt),timestamp=create('time','attention-updated');
     if(item.updatedAt&&!Number.isNaN(updated.getTime())){timestamp.dateTime=updated.toISOString();timestamp.textContent=`Updated ${new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:state.config.timezone}).format(updated)}`;}else timestamp.textContent='Update time unavailable';
     card.append(timestamp);
-    for(const blocker of item.blockers||[])card.append(create('p','attention-blocker',blocker.code==='missing_answer'&&progress?.unanswered===0?'Previous missing answers are saved. Retry to check the live form.':blocker.summary));
+    for(const blocker of item.blockers||[])card.append(create('p','attention-blocker',blocker.code==='missing_answer'&&progress?.unanswered===0?(item.singleRetry?'Previous missing answers are saved. Retry to check the live form.':'Previous missing answers are saved. Follow the application status below.'):blocker.summary));
     card.append(create('p','attention-reason',item.retryReason));
     const actions=create('div','attention-actions');
     if(item.questions?.length){

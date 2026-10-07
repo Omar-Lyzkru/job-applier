@@ -27,6 +27,8 @@ Open [the dashboard](http://127.0.0.1:3210). Keep the terminal running while you
 5. In **Answers**, open **Common questions** to save recurring education and screening answers before a run. Review any missing questions and select an offered choice where available. Your résumé is never used to guess screening answers.
 6. Turn off Dry run and choose **Start applying** to submit supported applications automatically.
 
+Use **Dark mode** / **Light mode** in the sidebar to switch appearance. Your choice stays in this browser; it does not change your profile or application settings.
+
 Profile, answer, and résumé edits take effect in the next run. **Stop** prevents further applications and waits for any submission already in flight to settle.
 
 Country and state / region accept typing and show dropdown suggestions. Enter or choose a country to see its regions; finishing a change to a different country clears the previous region. Saved locations remain visible, recognized abbreviations save as full names, and custom typed values are preserved. LinkedIn and portfolio links accept addresses such as `www.linkedin.com/in/your-name` or `example.com`; saving adds `https://` automatically. Both links are optional.
@@ -153,6 +155,8 @@ and affected applications; expand **Affected applications** to see every origina
 label, employer, job link, and failure reason. Different choices, controls, date
 formats, employer consent, or conflicting saved provenance keep separate cards.
 Saving writes the existing answer key once and preserves operational blockers.
+
+**Questions to answer** counts only unresolved answer information. The Answers screen separates **Needs an answer**, **Answer saved — retry needed**, and **Manual completion needed**. Saving an answer moves a resolved entry failure out of the unanswered count; it still needs an explicit retry or manual completion to verify the LinkedIn form. History keeps the original outcome.
 
 Pending questions show the saved answer after saving or reloading. If LinkedIn
 could not enter it, the card keeps its failure reason and explains that entry

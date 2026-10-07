@@ -31,3 +31,6 @@ h2{font-size:16px;font-weight:650;letter-spacing:-.3px;margin:0 0 7px}h3{font-si
 .screening-meaning,.screening-resolution,.screening-details{font-size:11px;line-height:1.7;color:var(--palette-60738f);overflow-wrap:anywhere}.screening-meaning,.screening-resolution{margin:0 0 8px}.screening-details{margin:0 0 16px}.screening-details>summary{cursor:pointer;color:var(--palette-405371)}.screening-details p{margin:8px 0}.screening-details>summary:focus-visible{outline:3px solid var(--palette-94b8ff);outline-offset:3px}
 
 .theme-toggle{margin-top:24px;margin-bottom:16px;align-self:flex-start}.answer-status-section>h2{margin:0;padding:20px 27px 10px;font-size:13px;color:var(--palette-405371);border-top:1px solid var(--line)}.answer-status-section:first-child>h2{border-top:0}@media(max-width:760px){.theme-toggle{margin:12px 0 0;padding:7px 12px;font-size:10px}.answer-status-section>h2{padding:20px 22px 10px}}
+
+/* Save feedback keeps dark backgrounds and white text in both appearances. */
+.toast{background:#243b5f}.toast.error{background:#9e4948}

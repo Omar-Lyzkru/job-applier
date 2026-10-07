@@ -625,3 +625,44 @@ to ignored private verification storage; all 59 copied files were checksum-verif
 before removing the temporary scratch workspace. Private backup and startup
 proof remain local. Phase 3A is complete. Stop here; Phase 3B needs separate
 user approval.
+
+
+## Theme switch and saved-answer display fix (2026-10-06)
+
+User approved the bounded design before implementation. The synthetic save
+reproduction returned HTTP 200 and a persisted answer while retaining an
+operational question count and historical needs_answer label. The primary
+read-only diagnosis also found existing explicit answers resolving all projected
+questions; entry/verification failures were the visible retained cards.
+
+The sidebar now switches Light/Dark mode and stores only the appearance choice
+in this browser. An early same-origin script applies it before styles; denied
+browser storage still permits switching for the current page. Desktop/390px
+screenshots were inspected; dark card and save-feedback contrast are tested.
+
+Bootstrap adds answerStatus/answerStatusCounts and attention answerProgress
+without changing existing questionCounts, storage keys, saved values, history
+or retry eligibility. Questions are separated into needs-answer, saved/retry
+and manual groups. Only unresolved answer information contributes to the
+Questions to answer count. Historical outcomes remain unchanged. Uncertain,
+reserved, active and duplicate-protected work keeps its status and does not
+receive retry guidance when retry is unavailable.
+
+Changed files: public/theme.js, public/index.html, public/app.js,
+public/styles.css, src/server.mjs, src/attention-queue.mjs,
+test/server.test.mjs, test/dashboard.test.mjs and README.md, plus these notes.
+Starting unit/API suite: 208/208. New API and browser regressions failed before
+implementation. Visual inspection caught named white card backgrounds; the
+contrast regression failed before correction. Independent review found two
+Important issues (toast contrast and protected-status precedence), no Critical
+or Minor issues. Both were reproduced with failing browser regressions and
+fixed in one pass. Final unit/API: **209/209**. Full dashboard: **43/43**.
+Changed JavaScript syntax and whitespace checks passed. Browser adapter/form
+code is unchanged; its prior 3A baseline is historical, not rerun for this fix.
+
+Review boundaries: Phase 3B remains separate (cost: scoped storage limitations
+remain until that phase); live LinkedIn entry/submission was not tested (cost:
+real employer forms may still need manual completion); production-state
+preservation is owned by delivery checks (cost: a missed comparison could hide
+state or deployed-code drift). No live application or real applicant answer
+was changed by testing. Delivery proof is kept privately under data/verification.
