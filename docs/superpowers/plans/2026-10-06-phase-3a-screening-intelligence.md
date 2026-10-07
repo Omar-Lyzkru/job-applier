@@ -10,7 +10,7 @@
 
 **Spec:** ../specs/2026-10-06-phase-3-application-intelligence-design.md, especially sections 5–7 and the 3A row in section 12.
 
-**Status:** Plan execution approved by the user’s “continue” on 2026-10-06. Tasks 1–3 are complete; Task 4 is in progress. Planning base `2443efd`; include the approved design and this plan in the execution checkout.
+**Status:** Plan execution approved by the user’s “continue” on 2026-10-06. Tasks 1–4 are complete and verified. Phase 3A is delivered; Phase 3B remains paused for separate approval. Planning base `2443efd`; include the approved design and this plan in the execution checkout.
 
 ## Global Constraints
 
@@ -189,8 +189,8 @@ assert.equal(resolveAnswer({label:'What is your highest completed degree?',type:
 - [x] **Step 5 — Check syntax of changed JavaScript and `git diff --check`; inspect synthetic desktop/mobile screenshots.** Confirm only 3A files/features changed and private data/artifacts remain ignored. Repeat suites only when a new change/failure warrants it.
 - [x] **Step 6 — Request one fresh independent whole-change review under the preserved Native method.** Focus on scope/equivalence, legacy precedence, draft stability, false/zero and unchanged protected submission behavior. Review findings need a scoped regression/fix/retest; no automatic expansion into later subphases.
 - [x] **Step 7 — Document actual behavior and results.** Explain supported finite matching, why similar questions may remain separate, and the still-manual C-family/unknown contexts. Record files, counts, review findings/fixes, practical limits and deferred 3B–3E. Do not claim live LinkedIn compatibility from synthetic fixtures.
-- [ ] **Step 8 — Commit verified 3A changes and complete authorized delivery using the existing session/repository integration rules.** If updating the primary local app, first back up private state and confirm idle/no in-flight work; compare config/answers and history identity/order after startup. Do not edit real answers, trigger a run, force-push, or publish private data. Any unperformed delivery/check remains explicitly reported.
-- [ ] **Step 9 — Report completion and STOP for approval.** 3A completion is not authorization for 3B.
+- [x] **Step 8 — Commit verified 3A changes and complete authorized delivery using the existing session/repository integration rules.** If updating the primary local app, first back up private state and confirm idle/no in-flight work; compare config/answers and history identity/order after startup. Do not edit real answers, trigger a run, force-push, or publish private data. Any unperformed delivery/check remains explicitly reported.
+- [x] **Step 9 — Report completion and STOP for approval.** 3A completion is not authorization for 3B.
 
 ## Plan self-review and approval boundary
 
@@ -213,5 +213,12 @@ obsolete grouped-card summary selector (initial run 150/151). Focused form
 boundary 2/2 and grouped/explanation UI 2/2 passed. JavaScript syntax and
 whitespace passed; synthetic desktop/390px screens inspected. Independent
 replacement review: no Critical/Important findings; one Minor caution-label
-issue deferred, with consent reuse guards verified. Delivery is the remaining
-step; no 3B work started.
+issue deferred, with consent reuse guards verified. The primary app is running
+idle at port 3210, and GitHub main matched delivered source revision `2e347cb`.
+The integrated primary unit/API suite passed 208/208. Config, answers and all
+357 history records stayed unchanged; startup initiated no run. Native Task 4
+completion independently recorded another 208/208 unit/API pass. Test logs,
+review, ledger and synthetic screenshots (59 files) were privately copied and
+checksum-verified before temporary-workspace cleanup. Phase 3A is complete;
+no 3B work started. Final delivery consists only of this checklist/documentation
+closure and a normal push, followed by remote revision verification.

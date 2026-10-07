@@ -555,8 +555,7 @@ Phase 2 is delivered; Phase 3 remains paused for explicit user approval.
 
 ## Phase 3A — Screening meanings and explanations (2026-10-06)
 
-Tasks 1–3 are committed on `codex/phase-3a-screening-intelligence`; final
-verification/delivery is Task 4. The implementation range starts at `c0b2bb0`.
+Tasks 1–4 are complete, verified and delivered on primary/GitHub `main`. The implementation range starts at `c0b2bb0`.
 Pure reviewed screening meanings preserve existing exact keys and scope, add
 explicit overall total/professional years, selected education/student aliases,
 and separate US sponsorship now/future intents. Combined sponsorship cannot be
@@ -584,8 +583,9 @@ and one Minor; no completed review was repeated. Root confirmed the Minor:
 “May we send you text messages about your application?” is recognized as SMS
 but lacks the high-impact caution. Its employer-scoped No resolves correctly,
 and another employer remains missing. This display/impact-label issue is deferred
-under the Native review policy; consent/reuse guards are unchanged. Primary integration and private-state comparison are verified; remote delivery
-is the final pending check. No live applications or
+under the Native review policy; consent/reuse guards are unchanged. Primary integration, private-state comparison and GitHub delivery are verified.
+GitHub main matched the delivered source revision `2e347cb`; only checklist
+and verification documentation follow that revision. No live applications or
 real applicant answer edits were made during testing. Phase 3B remains paused.
 
 
@@ -618,3 +618,10 @@ identities/order and attempted times are preserved. Questions match the
 canonical full-history projection. All 11 common-question records and six
 visible pending groups expose versioned explanations. Startup made zero run
 attempts. No real answers were edited or live applications submitted.
+
+Native Task 4 completion recorded a final **208/208** unit/API pass. The
+plan-specific ledger, review, test logs and synthetic screenshots were copied
+to ignored private verification storage; all 59 copied files were checksum-verified
+before removing the temporary scratch workspace. Private backup and startup
+proof remain local. Phase 3A is complete. Stop here; Phase 3B needs separate
+user approval.
