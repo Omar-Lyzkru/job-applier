@@ -584,8 +584,8 @@ and one Minor; no completed review was repeated. Root confirmed the Minor:
 “May we send you text messages about your application?” is recognized as SMS
 but lacks the high-impact caution. Its employer-scoped No resolves correctly,
 and another employer remains missing. This display/impact-label issue is deferred
-under the Native review policy; consent/reuse guards are unchanged. Production
-integration, private-state comparison and remote delivery are still pending. No live applications or
+under the Native review policy; consent/reuse guards are unchanged. Primary integration and private-state comparison are verified; remote delivery
+is the final pending check. No live applications or
 real applicant answer edits were made during testing. Phase 3B remains paused.
 
 
@@ -607,3 +607,14 @@ Deferred minor: one SMS wording lacks the caution note; it does not bypass
 employer scope or change automatic answer selection. New bank storage/migration,
 review objects and fit recheck remain deferred. Only deterministic local logic
 was added; no runtime dependency, paid service or live submission was introduced.
+
+
+Local delivery: clean primary main was fast-forwarded to the reviewed branch.
+The integrated primary unit/API suite passed **208/208**. Before startup, an
+ignored private backup confirmed no unfinished application states. The app
+started idle at http://127.0.0.1:3210/ and stayed idle during read-only bootstrap.
+Config, answers and history remained byte-for-byte unchanged; all 357 history
+identities/order and attempted times are preserved. Questions match the
+canonical full-history projection. All 11 common-question records and six
+visible pending groups expose versioned explanations. Startup made zero run
+attempts. No real answers were edited or live applications submitted.
