@@ -437,12 +437,12 @@ test('browser: grouped repeats have one editor, all job details, distinct counts
   const pending=page.locator('#pending-questions'),card=pending.locator('.pending-question');
   assert.equal(await card.count(),1);assert.equal(await pending.getByLabel('Answer for Evening work?',{exact:true}).count(),1);
   assert.equal(await page.locator('#question-count').textContent(),'1');assert.match(await page.locator('#question-summary').textContent(),/1 question.*2 applications/);
-  await card.locator('summary').click();assert.equal(await card.locator('a[href*="/jobs/view/"]').count(),2);
+  await card.locator('.affected-applications > summary').click();assert.equal(await card.locator('a[href*="/jobs/view/"]').count(),2);
   assert.match(await card.textContent(),/Selection timed out/);assert.match(await card.textContent(),/Read-only answer differs/);
   await card.getByLabel('Answer for Evening work?',{exact:true}).selectOption('No');await card.getByRole('button',{name:'Save this answer',exact:true}).click();await page.getByText('Answer saved',{exact:true}).waitFor();
   assert.deepEqual(await store.getAnswers(),{'evening work':'No'});assert.equal((await store.getQuestions()).length,2);assert.match(await card.textContent(),/Saved answer: No/);
   await page.reload();await page.getByRole('button',{name:'Answers',exact:true}).click();assert.match(await card.textContent(),/Saved answer: No/);
-  await card.locator('summary').click();await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/grouped-questions-desktop.png'),fullPage:true});
+  await card.locator('.affected-applications > summary').click();await mkdir(resolve('test-artifacts'),{recursive:true});await page.screenshot({path:resolve('test-artifacts/grouped-questions-desktop.png'),fullPage:true});
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve('test-artifacts/grouped-questions-mobile.png'),fullPage:true});
 });
 
