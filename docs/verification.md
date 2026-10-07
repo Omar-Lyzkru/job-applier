@@ -551,3 +551,59 @@ untracked. Synthetic verification screenshots, logs, the review and Native
 ledger were copied privately and checksum-verified before scratch cleanup.
 Only documentation/checklist changes followed the verified source commit.
 Phase 2 is delivered; Phase 3 remains paused for explicit user approval.
+
+
+## Phase 3A — Screening meanings and explanations (2026-10-06)
+
+Tasks 1–3 are committed on `codex/phase-3a-screening-intelligence`; final
+verification/delivery is Task 4. The implementation range starts at `c0b2bb0`.
+Pure reviewed screening meanings preserve existing exact keys and scope, add
+explicit overall total/professional years, selected education/student aliases,
+and separate US sponsorship now/future intents. Combined sponsorship cannot be
+derived from separate periods. No bank, migration, new retry command or
+submission-path change was introduced.
+
+Saved-answer explanations use actual resolver output. Bootstrap is additive;
+existing Answers cards show meaning/source/review reasons using plain text.
+Source matching, No/false/zero, scoped SMS, C-family manual handling, operational
+blockers and immutable draft compatibility remain intact. Initial synthetic
+baseline passed 73/73. Descriptor/domain/groups passed 46/46; server/groups
+passed 41/41; new dashboard test passed 1/1; form boundary tests passed 2/2.
+The full unit/API suite passed 208/208.
+
+The first full browser run passed 150/151. Its sole failure was an obsolete
+unqualified `summary` selector in the grouped-card test: adding the approved
+Why this answer disclosure intentionally provides two summaries. The failure
+was reproduced before scoping the test to Affected applications; the focused
+grouped-card and screening UI cases then passed 2/2. The full browser rerun passed **151/151**. Changed JavaScript syntax and whitespace checks passed; synthetic
+desktop and 390px screenshots were inspected without document overflow.
+
+The first reviewer launch hit a model usage limit before returning findings.
+The replacement independent read-only review found no Critical/Important issues
+and one Minor; no completed review was repeated. Root confirmed the Minor:
+“May we send you text messages about your application?” is recognized as SMS
+but lacks the high-impact caution. Its employer-scoped No resolves correctly,
+and another employer remains missing. This display/impact-label issue is deferred
+under the Native review policy; consent/reuse guards are unchanged. Production
+integration, private-state comparison and remote delivery are still pending. No live applications or
+real applicant answer edits were made during testing. Phase 3B remains paused.
+
+
+Review rulings:
+
+- The grouped-card test now targets Affected applications explicitly because
+  Why this answer adds a second disclosure; cost if wrong: affected-job detail
+  expansion would be untested.
+- Scoped bank/migration/unified review/recheck remain 3B–3E; cost if wrong:
+  legacy scope/collision and fit-review workflow limits persist.
+- Live LinkedIn compatibility was outside synthetic review; cost if wrong:
+  changed real employer layouts may still require manual attention.
+- Root owns private-state and local/remote delivery checks; cost if wrong:
+  applicant state or deployed code could differ.
+- Root owns the completed browser baseline and delivery documentation; cost if
+  wrong: an unverified regression or incomplete delivery could be missed.
+
+Deferred minor: one SMS wording lacks the caution note; it does not bypass
+employer scope or change automatic answer selection. New bank storage/migration,
+review objects and fit recheck remain deferred. Only deterministic local logic
+was added; no runtime dependency, paid service or live submission was introduced.
