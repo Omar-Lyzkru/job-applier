@@ -104,7 +104,11 @@ export async function createStore(dataDir) {
         const at=new Date().toISOString(),expiresAt=command.expiresAt??null;
         if(expiresAt!==null&&(!Number.isFinite(Date.parse(expiresAt))||Date.parse(expiresAt)<=Date.parse(at)))throw new Error('Expiry must be a future timestamp');
         const entry={id:old?.id||randomUUID(),revision:(old?.revision||0)+1,state:'active',value:command.value,sourceQuestion:command.sourceQuestion,question:clone(command.question),scope:clone(command.scope),confirmedAt:at,updatedAt:at,expiresAt,provenance:clone(command.provenance)};
-        if(index>=0)bank.entries[index]=entry;else bank.entries.push(entry);
+        if(index>=0){
+          // Keep ownership of the old scope even when this confirmation moves.
+          if(bankDigest(old.scope)!==bankDigest(entry.scope))bank.entries.push({...old,id:randomUUID(),revision:1,state:'retired',updatedAt:at});
+          bank.entries[index]=entry;
+        }else bank.entries.push(entry);
         bank.revision++;return validateAnswerBank(bank);
       });
     },

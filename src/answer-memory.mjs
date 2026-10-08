@@ -1,3 +1,4 @@
+import {dateFormatCompatible} from './date-format.mjs';
 import {bankCandidates,describeBankQuestion} from './answer-bank.mjs';
 export function normalizeQuestion(text) {
   return String(text).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
@@ -66,44 +67,6 @@ function answerMeaning(value,intent) {
   if(isYearsIntent(intent)&&scalarYears(value))return String(Number(value));
   return String(value).normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
 }
-function graduationFormatCompatible(field,value) {
-  const answer=String(value).trim(),hint=`${field.label} ${field.placeholder||''}`;
-  if(field.pattern){
-    try{if(!new RegExp(`^(?:${field.pattern})$`,'v').test(answer))return false;}catch{return false;}
-  }
-  if(field.type==='date'){
-    const parsed=/^(\d{4})-(\d{2})-(\d{2})$/.exec(answer);
-    if(!parsed)return false;
-    const date=new Date(`${answer}T00:00:00Z`);
-    return Number.isFinite(date.valueOf())&&date.toISOString().slice(0,10)===answer;
-  }
-  const format=hint.match(/\b(yyyy|year|mm|month|dd|day)(\s*[/.-]\s*|\s+)(yyyy|year|mm|month|dd|day)(?:\2(yyyy|year|mm|month|dd|day))?\b/i);
-  if(format){
-    const units=[format[1],format[3],format[4]].filter(Boolean).map(unit=>unit.toLowerCase());
-    const separator=format[2].trim(),parts=separator?answer.split(separator):answer.split(/\s+/);
-    if(parts.length!==units.length)return false;
-    const values={};
-    for(let i=0;i<units.length;i++){
-      const unit=units[i],part=parts[i].trim(),kind=/^(?:yyyy|year)$/.test(unit)?'year':/^(?:mm|month)$/.test(unit)?'month':'day';
-      if(values[kind]!==undefined)return false;
-      if(unit==='month'){
-        const names=['january','february','march','april','may','june','july','august','september','october','november','december'];
-        values.month=names.findIndex(name=>[name,name.slice(0,3)].includes(part.toLowerCase()))+1;
-      }else{
-        if(!(kind==='year'?/^\d{4}$/:/^\d{2}$/).test(part))return false;
-        values[kind]=Number(part);
-      }
-    }
-    if(values.year===undefined||values.month===undefined||values.month<1||values.month>12)return false;
-    if(values.day!==undefined){
-      if(values.day<1||values.day>31)return false;
-      const iso=`${String(values.year).padStart(4,'0')}-${String(values.month).padStart(2,'0')}-${String(values.day).padStart(2,'0')}`;
-      const date=new Date(`${iso}T00:00:00Z`);
-      return Number.isFinite(date.valueOf())&&date.toISOString().slice(0,10)===iso;
-    }
-  }
-  return true;
-}
 const ignoredWords=new Set(['a','an','the','to','of','in','on','for','and','or','do','does','you','your','we','us','our','are','is','have','has','what','which','how','tell','describe','about','please']);
 function tokens(key) {return new Set(key.split(' ').filter(word=>word.length>1&&!ignoredWords.has(word)));}
 function genericSuggestions(key,entries) {
@@ -140,7 +103,7 @@ function findLegacySavedAnswer(field,answers) {
   }
   if(Object.hasOwn(answers,key)){
     if(!validYearsAnswer(field,intent,answers[key]))return {kind:'missing',reason:'Enter a nonnegative number of years for this skill'};
-    if(intent==='graduation'&&!graduationFormatCompatible(field,answers[key]))return {kind:'missing',reason:'Confirm the requested graduation date format',suggestions:[suggestion(key,answers[key],'Saved graduation answer uses a different date format')]};
+    if(intent==='graduation'&&!dateFormatCompatible(field,answers[key]))return {kind:'missing',reason:'Confirm the requested graduation date format',suggestions:[suggestion(key,answers[key],'Saved graduation answer uses a different date format')]};
     return {answer:answers[key],sourceQuestion:key,match:'exact'};
   }
   const candidates=intent?entries.filter(([question])=>classify(question)===intent):[];
@@ -148,7 +111,7 @@ function findLegacySavedAnswer(field,answers) {
     const suggestions=candidates.slice(0,3).map(([question,answer])=>suggestion(question,answer,'Same known question meaning'));
     if(new Set(candidates.map(([,answer])=>answerMeaning(answer,intent))).size!==1)return {kind:'missing',reason:'Conflicting saved answers need review',suggestions};
     if(!validYearsAnswer(field,intent,candidates[0][1]))return {kind:'missing',reason:'Enter a nonnegative number of years for this skill',suggestions};
-    if(intent==='graduation'&&!graduationFormatCompatible(field,candidates[0][1]))
+    if(intent==='graduation'&&!dateFormatCompatible(field,candidates[0][1]))
       return {kind:'missing',reason:'Confirm the requested graduation date format',suggestions};
     return {answer:candidates[0][1],sourceQuestion:candidates[0][0],match:'equivalent',suggestions};
   }

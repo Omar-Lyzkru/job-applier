@@ -720,3 +720,50 @@ C-family confirmation does not reinterpret collapsed legacy keys.
 
 Deferred: 3C optional legacy review/import, 3D unified reviews, 3E fit recheck,
 Phases 4–6. The earlier 3A SMS caution-display minor remains deferred.
+
+Fresh whole-phase verification after the fixes: **237/237 unit/API**, **164/164
+browser** (adapter, dashboard and native forms), zero failures. Four focused
+scoped-dashboard cases also pass after the light-text contrast fix. Inspected
+light/dark desktop and 390px confirmation screenshots; no horizontal overflow.
+Changed JavaScript syntax checks and `git diff --check` pass. Independent Native
+whole-branch review is in progress at product head `0d9c854`; delivery is not yet
+claimed complete.
+
+
+Independent whole-branch review at `31bb667..0d9c854`: no Critical findings,
+two Important findings, no Minor findings and nothing declined to judge. Root
+confirmed both findings by their effects and fixed them in one TDD pass:
+
+- Scope narrowing silently restored replaced legacy exact answers outside the
+  new scope. Store/resolver and HTTP regressions failed 0/2, then passed 2/2.
+  Changed scopes retain a separate retired owner. Employer/concept ownership
+  survives narrower scope, expiry, retirement and reopening; legacy bytes remain
+  unchanged. Existing 2,000-entry bounds include these retained owners.
+- Text date hints accepted impossible dates. Resolution/store/HTTP regressions
+  failed 0/3, then passed 3/3. Extracted existing calendar validation into pure
+  `src/date-format.mjs` shared by legacy and bank. Invalid months, unknown month
+  names, invalid days and non-leap February 29 reject; valid leap dates pass.
+
+Fresh post-review suites: **242/242 unit/API** and **164/164 browser**, zero
+failures (browser duration 217568 ms). Changed JavaScript syntax and diff
+whitespace checks pass. Independent review fixes are verified; delivery follows.
+
+
+Changed files for 3B: `src/answer-bank.mjs`, `src/date-format.mjs`,
+`src/answer-memory.mjs`, `src/store.mjs`, `src/domain.mjs`,
+`src/screening-intelligence.mjs`, `src/attention-queue.mjs`,
+`src/question-groups.mjs`, `src/runner.mjs`, `src/server.mjs`,
+`src/browser/forms.mjs`, `src/browser/linkedin.mjs`; `public/app.js`,
+`public/index.html`, `public/styles.css`; `package.json`; tests in
+`test/answer-bank.test.mjs`, `test/store.test.mjs`, `test/domain.test.mjs`,
+`test/server.test.mjs`, `test/runner.test.mjs`, `test/question-groups.test.mjs`,
+`test/forms.test.mjs`, `test/dashboard.test.mjs`, `test/fixtures/scoped-bank.mjs`;
+README, this verification file and the approved 3B checklist.
+
+Rulings made during implementation, with their costs if wrong:
+1. C-family bank reuse requires compatible independently confirmed identities;
+   collapsed legacy keys stay manual. Cost: renewed direct confirmation.
+2. Scoped editors use separate occurrence targets while legacy grouped editors
+   keep their grouping. Cost: extra per-job cards, with no cross-job draft writes.
+No additional final-review rulings or newly deferred minors. The earlier 3A
+SMS caution-display minor remains deferred (low-impact caution wording).

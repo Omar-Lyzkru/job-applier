@@ -124,9 +124,9 @@ New same-origin token-guarded commands (JSON, bounded input):
 
 **Files:** Update README.md, docs/verification.md and this checklist; fix only verified 3B regressions in their owning files.
 
-- [ ] Run `npm test` and `npm run test:browser`, saving complete logs/actual counts; require zero failures. Inspect dark/light desktop and 390px synthetic scoped-editor screenshots, check changed JavaScript syntax and `git diff --check`. No paid/live service or dependency installation.
-- [ ] Request one fresh whole-change review under Native execution. Focus on ownership/fallback, scope ambiguity, source validation, frozen bank consistency, drafts and untouched protected submission invariants. Reproduce/fix Important/Critical findings with RED→GREEN tests and green suites; record Minor findings for later.
-- [ ] Record actual files/results, known manual/unsupported limits, reviewer rulings and deferred 3C–3E. Explain that new scoped entries do not import legacy values or start applications.
+- [x] Run `npm test` and `npm run test:browser`, saving complete logs/actual counts; require zero failures. Inspect dark/light desktop and 390px synthetic scoped-editor screenshots, check changed JavaScript syntax and `git diff --check`. No paid/live service or dependency installation.
+- [x] Request one fresh whole-change review under Native execution. Focus on ownership/fallback, scope ambiguity, source validation, frozen bank consistency, drafts and untouched protected submission invariants. Reproduce/fix Important/Critical findings with RED→GREEN tests and green suites; record Minor findings for later.
+- [x] Record actual files/results, known manual/unsupported limits, reviewer rulings and deferred 3C–3E. Explain that new scoped entries do not import legacy values or start applications.
 - [ ] Complete previously authorized integration/GitHub delivery only after clean verification. Back up private data (including bank if present), confirm idle/no in-flight work, preserve legacy bytes and history identity/order/attempt times across startup, and verify local/remote revision. Keep proof private; preserve it before native workspace cleanup/archive.
 - [ ] Report verified 3B completion and STOP. No 3C implementation without separate approval.
 

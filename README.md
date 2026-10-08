@@ -245,7 +245,9 @@ checkbox; the shared answer itself remains unchanged.
 The **Scoped answer library** shows each confirmation's source and scope. Edit
 there to change a value or scope, or choose **Retire scoped answer** to stop reuse.
 Retirement retains ownership so the old shared value cannot return in that scope.
-An optional expiry also requires renewed confirmation. Same observed scope saves
+Changing scope also retains ownership of the old scope; it requires a new
+confirmation there instead of bringing back an older shared answer. An optional
+expiry also requires renewed confirmation. Same observed scope saves
 update its existing entry; overlapping conflicting scopes need review, with no
 preference for the newest or narrowest confirmation.
 

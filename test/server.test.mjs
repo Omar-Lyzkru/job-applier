@@ -547,3 +547,23 @@ test('scoped answers API rejects invalid control values unknown consent and sour
  const save=store.saveBankEntry;store.saveBankEntry=async command=>{await store.saveQuestions([{...q,step:'2'}]);return save(command);};assert.equal((await send('/api/answer-bank/save',{...body,value:0})).status,409);store.saveBankEntry=save;assert.equal((await store.getAnswerBank()).revision,0);
  await store.saveQuestions([{...q,label:'Consent to SMS marketing',company:'Unknown'}]);assert.equal((await send('/api/answer-bank/preview',{sourceRef:ref})).status,409);
 });
+
+test('scoped answers API narrowing employer scope cannot restore legacy answers on other jobs',async t=>{
+ const {store,send,data,commands}=await observedBank(t,{label:'School',type:'text'});await store.saveAnswers({School:'Old school'});
+ const p=await (await send('/api/answer-bank/preview',{sourceRef:data.questions[0].bankQuestion.sourceRef})).json();
+ const create={sourceRef:p.sourceRef,expectedBankRevision:p.bankRevision,sourceDigest:p.sourceDigest,value:'New school',scope:p.allowedScopes.find(s=>s.kind==='employer'),confirmed:true,replacementConfirmed:true,replacementDigest:p.previousExact.digest};
+ // Preview source references are supplied by bootstrap, not echoed by preview.
+ create.sourceRef=data.questions[0].bankQuestion.sourceRef;
+ assert.equal((await send('/api/answer-bank/save',create)).status,200);const entry=(await store.getAnswerBank()).entries[0];
+ const edit=await (await send('/api/answer-bank/preview',{entryId:entry.id})).json();
+ assert.equal((await send('/api/answer-bank/save',{entryId:entry.id,expectedEntryRevision:entry.revision,expectedBankRevision:edit.bankRevision,sourceDigest:edit.sourceDigest,value:'New school',scope:edit.allowedScopes[0],confirmed:true,replacementConfirmed:true,replacementDigest:edit.previousExact.digest})).status,200);
+ const b=await store.getAnswerBank();assert.equal(b.entries.filter(e=>e.state==='retired'&&e.scope.kind==='employer').length,1);assert.deepEqual(commands,[]);
+});
+
+test('scoped answers API rejects impossible text graduation dates and accepts a leap day',async t=>{
+ const {store,send,data,commands}=await observedBank(t,{label:'Expected graduation',type:'text',min:undefined,max:undefined,step:undefined,placeholder:'MM/DD/YYYY',pattern:'[0-9]{2}/[0-9]{2}/[0-9]{4}'});
+ const sourceRef=data.questions[0].bankQuestion.sourceRef,p=await (await send('/api/answer-bank/preview',{sourceRef})).json();
+ const body={sourceRef,expectedBankRevision:p.bankRevision,sourceDigest:p.sourceDigest,scope:p.allowedScopes[0],confirmed:true};
+ for(const value of ['99/01/2028','02/30/2028','02/29/2027'])assert.equal((await send('/api/answer-bank/save',{...body,value})).status,400);
+ assert.equal((await store.getAnswerBank()).revision,0);assert.equal((await send('/api/answer-bank/save',{...body,value:'02/29/2028'})).status,200);assert.deepEqual(commands,[]);
+});

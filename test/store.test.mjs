@@ -261,3 +261,34 @@ test('scoped bank pre and post rename failures recover committed truth without c
  await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());assert.equal((await reopened.getAnswerBank()).entries[0].value,0);
  for(let i=0;i<files.length;i++)assert.deepEqual(await readFile(join(dir,files[i]+'.json')),before[i]);assert.equal((await fsp.stat(join(dir,'answer-bank.json'))).mode&0o777,0o600);
 });
+
+import {findSavedAnswer} from '../src/answer-memory.mjs';
+test('scoped bank scope edits retain old ownership through retirement expiry and restart',async t=>{
+ for(const kind of ['employer','concept']){
+  const dir=await temporary(t),store=await createStore(dir),field={label:'School',type:'text',jobId:'123',company:'Example'},question=describeBankQuestion(field);
+  await store.saveAnswers({School:'Old school'});const before=await readFile(join(dir,'answers.json'));
+  const scope=kind==='employer'?{kind,employerIdentity:'example'}:{kind,intent:question.descriptor.intent,qualifiers:question.descriptor.qualifiers};
+  const command={expectedBankRevision:0,question,sourceQuestion:field.label,scope,value:'New school',confirmed:true,replacementConfirmed:true,legacyKey:'school',provenance:{jobId:'123',recordId:'observed',company:'Example',replacementDigest:bankDigest('Old school')}};
+  let b=await store.saveBankEntry(command);const id=b.entries[0].id,other={...field,jobId:'456'},answers=await store.getAnswers();
+  assert.equal(findSavedAnswer(other,answers,{answerBank:b}).answer,'New school');
+  b=await store.saveBankEntry({...command,entryId:id,expectedEntryRevision:1,expectedBankRevision:1,scope:{kind:'job',jobId:'123'},expiresAt:'2099-01-01T00:00:00.000Z'});
+  assert.equal(findSavedAnswer(other,answers,{answerBank:b}).kind,'missing','Removed scope must not resurrect legacy answer');
+  assert.equal(findSavedAnswer(field,answers,{answerBank:b}).answer,'New school');
+  assert.equal(findSavedAnswer(field,answers,{answerBank:b,now:'2100-01-01T00:00:00.000Z'}).kind,'missing');
+  b=await store.retireBankEntry({entryId:id,expectedEntryRevision:2,expectedBankRevision:2});
+  for(const target of [field,other])assert.equal(findSavedAnswer(target,answers,{answerBank:b}).kind,'missing');
+  if(kind==='concept')assert.equal(findSavedAnswer({...other,company:'Another employer'},answers,{answerBank:b}).kind,'missing');
+  await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());
+  assert.equal(findSavedAnswer(other,await reopened.getAnswers(),{answerBank:await reopened.getAnswerBank()}).kind,'missing');assert.deepEqual(await readFile(join(dir,'answers.json')),before);
+ }
+});
+
+test('scoped bank saves reject text graduation date mistakes without committing',async t=>{
+ const dir=await temporary(t),store=await createStore(dir);t.after(()=>store.close());
+ for(const [placeholder,value] of [['MM/YYYY','99/2028'],['Month Year','Smarch 2028'],['MM/DD/YYYY','02/30/2028'],['MM/DD/YYYY','02/29/2027']]){
+  const field={label:'Expected graduation',type:'text',jobId:'123',placeholder};
+  await assert.rejects(store.saveBankEntry(bankCommand(value,{sourceQuestion:field.label,question:describeBankQuestion(field)})),/incompatible/);assert.equal((await store.getAnswerBank()).revision,0);
+ }
+ const field={label:'Expected graduation',type:'text',jobId:'123',placeholder:'MM/DD/YYYY'};
+ assert.equal((await store.saveBankEntry(bankCommand('02/29/2028',{sourceQuestion:field.label,question:describeBankQuestion(field)}))).entries[0].value,'02/29/2028');
+});

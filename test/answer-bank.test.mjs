@@ -82,3 +82,9 @@ test('bank employer consent requires observed employer and reviewed application 
  const marketing={label:'Do you consent to receiving SMS marketing?',type:'checkbox',jobId:'123',company:'Example',consentText:'Marketing texts. Terms v1.'};assert.equal(allowedBankScopes(marketing).length,0);
  const e=entry(f,'UH',{kind:'employer',employerIdentity:'other employer'});assert.throws(()=>validateAnswerBank(bank(e)));
 });
+
+test('scoped text graduation dates reject impossible calendar values during resolution',()=>{
+ const cases=[['MM/YYYY','99/2028'],['MM/YYYY','00/2028'],['Month Year','Smarch 2028'],['MM/DD/YYYY','02/30/2028'],['MM/DD/YYYY','02/29/2027'],['DD-MM-YYYY','31-04-2028']];
+ for(const [placeholder,value] of cases){const field={...f,label:'Expected graduation',placeholder};assert.equal(bankCandidates(field,bank(entry(field,value)),{now:instant}).exact.length,0,`${placeholder}: ${value}`);}
+ for(const [placeholder,value] of [['MM/YYYY','05/2028'],['Month Year','May 2028'],['MM/DD/YYYY','02/29/2028'],['DD-MM-YYYY','29-02-2028']]){const field={...f,label:'Expected graduation',placeholder};assert.equal(bankCandidates(field,bank(entry(field,value)),{now:instant}).exact.length,1);}
+});

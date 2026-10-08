@@ -1,3 +1,4 @@
+import {dateFormatCompatible} from './date-format.mjs';
 import {createHash} from 'node:crypto';
 import {describeScreening} from './screening-intelligence.mjs';
 
@@ -63,13 +64,7 @@ export function bankValueCompatible(question,value){
  if(c.maxLength!==null&&String(value).length>Number(c.maxLength))return false;
  if(c.pattern){try{if(!new RegExp(`^(?:${c.pattern})$`,'v').test(String(value)))return false;}catch{return false;}}
  if(c.type==='date'){const v=String(value);if(!calendarDate(v)||c.min!==null&&v<c.min||c.max!==null&&v>c.max)return false;const step=c.step==='any'?null:Number(c.step??1),days=(Date.parse(v)-Date.parse(c.min||'1970-01-01'))/86400000;if(step!==null&&Math.abs(days/step-Math.round(days/step))>1e-8)return false;}
- if(c.format){
-  // Format identity is checked between observations; numeric date hints also constrain the value.
-  const units=c.format.match(/yyyy|year|mm|month|dd|day/g),sep=c.format.match(/[/.\-]/)?.[0];
-  const parts=sep?String(value).split(sep):String(value).trim().split(/\s+/);
-  if(parts.length!==units.length)return false;
-  for(let i=0;i<units.length;i++){const u=units[i],p=parts[i];if(/yyyy|year/.test(u)?!/^\d{4}$/.test(p):u==='month'?!/^[a-z]+$/i.test(p):!/^\d{2}$/.test(p))return false;}
- }
+ if(c.format&&!dateFormatCompatible({label:c.format,type:c.type},value))return false;
  return true;
 }
 export function bankCandidates(field,bank,{now=new Date()}={}){
