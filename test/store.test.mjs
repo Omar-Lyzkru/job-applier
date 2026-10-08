@@ -218,3 +218,46 @@ test('post-rename directory sync failure cannot erase a reserved attempt during 
  }finally{fsp.open=originalOpen;syncBuiltinESMExports();}
  await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());await reopened.recoverWork();assert.equal((await reopened.getHistory())[0].status,'unconfirmed');
 });
+
+import {describeBankQuestion,bankCandidates,bankDigest} from '../src/answer-bank.mjs';
+const bankField={label:'Years of professional Python experience',type:'number',jobId:'123',company:'Example',min:'0',step:'1'};
+const bankCommand=(value=0,extra={})=>({expectedBankRevision:0,question:describeBankQuestion(bankField),sourceQuestion:bankField.label,scope:{kind:'job',jobId:'123'},value,confirmed:true,provenance:{jobId:'123',recordId:'observed'},...extra});
+test('scoped bank absent reads and coherent snapshots preserve private legacy bytes',async t=>{
+ const dir=await temporary(t),store=await createStore(dir);t.after(()=>store.close());await store.saveAnswers({'School':'UH'});
+ const before=await readFile(join(dir,'answers.json'));assert.deepEqual(await store.getAnswerBank(),{version:1,revision:0,entries:[]});
+ await assert.rejects(readFile(join(dir,'answer-bank.json')),/ENOENT/);const snapshot=await store.getRunInputs();snapshot.answers.school='Other';snapshot.answerBank.revision=20;
+ assert.equal((await store.getRunInputs()).answers.school,'UH');assert.equal((await store.getAnswerBank()).revision,0);assert.deepEqual(await readFile(join(dir,'answers.json')),before);
+});
+test('scoped bank corruption rejects startup',async t=>{const dir=await temporary(t);await writeFile(join(dir,'answer-bank.json'),'{"version":99}');await assert.rejects(createStore(dir),/answer-bank.json.*corrupt/);});
+test('scoped bank concurrent saves stale edits and retirement retain typed durable ownership',async t=>{
+ const dir=await temporary(t),store=await createStore(dir);
+ const results=await Promise.allSettled([store.saveBankEntry(bankCommand()),store.saveBankEntry(bankCommand(2))]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.match(results.find(r=>r.status==='rejected').reason.message,/stale/i);
+ let b=await store.getAnswerBank();assert.equal(b.entries[0].value,0);const id=b.entries[0].id;
+ await assert.rejects(store.saveBankEntry(bankCommand(1,{entryId:id,expectedEntryRevision:1})),/stale/i);
+ await assert.rejects(store.saveBankEntry(bankCommand(1,{expectedBankRevision:1,entryId:id,expectedEntryRevision:1,confirmed:false})),/confirm/i);
+ await assert.rejects(store.saveBankEntry(bankCommand(1,{expectedBankRevision:1,entryId:id,expectedEntryRevision:1,sourceQuestion:'Other'})),/source/i);
+ b=await store.retireBankEntry({entryId:id,expectedBankRevision:1,expectedEntryRevision:1});assert.equal(b.entries[0].state,'retired');assert.equal(bankCandidates(bankField,b).owned.length,1);assert.equal(bankCandidates(bankField,b).exact.length,0);
+ await assert.rejects(store.retireBankEntry({entryId:id,expectedBankRevision:2,expectedEntryRevision:2}),/retired/i);
+ await assert.rejects(store.saveBankEntry(bankCommand(3,{expectedBankRevision:2,entryId:id,expectedEntryRevision:2})),/retired/i);
+ await store.saveBankEntry(bankCommand(false,{expectedBankRevision:2,question:describeBankQuestion({...bankField,label:'Would you relocate?',type:'checkbox'}),sourceQuestion:'Would you relocate?'}));
+ await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());const values=(await reopened.getAnswerBank()).entries.map(e=>e.value);assert.deepEqual(values,[0,false]);
+});
+test('scoped bank replacement digest is checked inside serialized commit against current legacy truth',async t=>{
+ const dir=await temporary(t),store=await createStore(dir);t.after(()=>store.close());await store.saveAnswers({[bankField.label]:4});
+ const command=bankCommand(0,{legacyKey:'years of professional python experience',provenance:{jobId:'123',recordId:'observed',replacementDigest:bankDigest(4)},replacementConfirmed:true});
+ const changed=store.saveAnswers({[bankField.label]:5});await assert.rejects(store.saveBankEntry(command),/replacement.*changed/i);await changed;
+ assert.equal((await store.getAnswerBank()).revision,0);await store.saveBankEntry({...command,provenance:{...command.provenance,replacementDigest:bankDigest(5)}});assert.equal((await store.getAnswers())['years of professional python experience'],5);
+});
+test('scoped bank pre and post rename failures recover committed truth without changing legacy files',async t=>{
+ const dir=await temporary(t),store=await createStore(dir);await store.saveAnswers({School:'UH'});await store.saveConfig({});await store.saveQuestions([]);await store.createRecord({id:'123'},'skipped');
+ const files=['answers','config','questions','history'],before=await Promise.all(files.map(n=>readFile(join(dir,n+'.json'))));
+ const originalRename=fsp.rename,originalOpen=fsp.open;
+ try{
+  fsp.rename=async(...args)=>{if(args[1]===join(dir,'answer-bank.json'))throw new Error('Synthetic bank rename EIO');return originalRename(...args);};syncBuiltinESMExports();
+  await assert.rejects(store.saveBankEntry(bankCommand()),/bank rename EIO/);assert.equal((await store.getAnswerBank()).revision,0);
+  fsp.rename=originalRename;let once=true;fsp.open=async(...args)=>{const handle=await originalOpen(...args);if(args[0]===dir&&once){handle.sync=async()=>{once=false;throw new Error('Synthetic bank directory EIO');};}return handle;};syncBuiltinESMExports();
+  await assert.rejects(store.saveBankEntry(bankCommand()),/bank directory EIO/);assert.equal((await store.getAnswerBank()).revision,1);
+ }finally{fsp.rename=originalRename;fsp.open=originalOpen;syncBuiltinESMExports();}
+ await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());assert.equal((await reopened.getAnswerBank()).entries[0].value,0);
+ for(let i=0;i<files.length;i++)assert.deepEqual(await readFile(join(dir,files[i]+'.json')),before[i]);assert.equal((await fsp.stat(join(dir,'answer-bank.json'))).mode&0o777,0o600);
+});

@@ -1,3 +1,4 @@
+import {emptyAnswerBank,validateAnswerBank,bankDigest,bankValueCompatible} from './answer-bank.mjs';
 import {mkdir,readFile,open,rename,unlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -35,6 +36,7 @@ export async function createStore(dataDir) {
     // every settings save uses the current URL validation and normalization.
     config:await load('config',defaultConfig(),value=>validateConfig(value,{profileLinks:false})),
     answers:await load('answers',{},validateAnswers),
+    answerBank:await load('answer-bank',emptyAnswerBank(),validateAnswerBank),
     questions:await load('questions',[],array),
     history:await load('history',[],value=> {
       array(value);
@@ -56,7 +58,7 @@ export async function createStore(dataDir) {
       await rename(temp,path);
       // Rename committed the visible file. Even if the directory sync fails,
       // later recovery must use that truth and never overwrite a reservation.
-      state[name]=value;
+      state[name==='answer-bank'?'answerBank':name]=value;
       const directory=await open(dataDir,'r');
       try { await directory.sync(); } finally { await directory.close(); }
     } finally {
@@ -67,7 +69,7 @@ export async function createStore(dataDir) {
   function mutate(name,update) {
     ensureOpen();
     const action=queue.then(async()=> {
-      const next=update(clone(state[name]));
+      const next=update(clone(state[name==='answer-bank'?'answerBank':name]));
       await persist(name,next);
       return clone(next);
     });
@@ -80,6 +82,41 @@ export async function createStore(dataDir) {
     saveResume:async resume=>mutate('config',config=>validateConfig({...config,resume},{profileLinks:false})),
     getAnswers:async()=>{ensureOpen();return clone(state.answers);},
     saveAnswers:async input=>mutate('answers',()=>validateAnswers(input)),
+    getAnswerBank:async()=>{ensureOpen();return clone(state.answerBank);},
+    getRunInputs(){ensureOpen();return queue.then(()=>clone({config:state.config,answers:state.answers,answerBank:state.answerBank}));},
+    saveBankEntry(command){
+      return mutate('answer-bank',bank=>{
+        const stale=message=>{throw Object.assign(new Error(message),{status:409});};
+        if(command.expectedBankRevision!==bank.revision)stale('Stale answer bank revision');
+        if(command.confirmed!==true)throw new Error('Explicit confirmation is required');
+        const index=command.entryId?bank.entries.findIndex(e=>e.id===command.entryId):-1;
+        const old=index>=0?bank.entries[index]:null;
+        if(command.entryId&&!old)stale('Bank entry not found');
+        if(old?.state==='retired')stale('Bank entry is retired');
+        if(old&&command.expectedEntryRevision!==old.revision)stale('Stale bank entry revision');
+        if(old&&(bankDigest(old.question)!==bankDigest(command.question)||old.sourceQuestion!==command.sourceQuestion||bankDigest(old.provenance)!==bankDigest(command.provenance)))throw new Error('Bank source is immutable');
+        if(command.provenance?.replacementDigest!==undefined){
+          if(command.replacementConfirmed!==true)throw new Error('Explicit replacement confirmation is required');
+          if(!Object.hasOwn(state.answers,command.legacyKey)||bankDigest(state.answers[command.legacyKey])!==command.provenance.replacementDigest)stale('Legacy replacement value changed');
+        }
+        if(!bankValueCompatible(command.question,command.value))throw new Error('Answer is incompatible with the observed control or context');
+        const at=new Date().toISOString(),expiresAt=command.expiresAt??null;
+        if(expiresAt!==null&&(!Number.isFinite(Date.parse(expiresAt))||Date.parse(expiresAt)<=Date.parse(at)))throw new Error('Expiry must be a future timestamp');
+        const entry={id:old?.id||randomUUID(),revision:(old?.revision||0)+1,state:'active',value:command.value,sourceQuestion:command.sourceQuestion,question:clone(command.question),scope:clone(command.scope),confirmedAt:at,updatedAt:at,expiresAt,provenance:clone(command.provenance)};
+        if(index>=0)bank.entries[index]=entry;else bank.entries.push(entry);
+        bank.revision++;return validateAnswerBank(bank);
+      });
+    },
+    retireBankEntry(command){
+      return mutate('answer-bank',bank=>{
+        const stale=message=>{throw Object.assign(new Error(message),{status:409});};
+        if(command.expectedBankRevision!==bank.revision)stale('Stale answer bank revision');
+        const entry=bank.entries.find(e=>e.id===command.entryId);if(!entry)stale('Bank entry not found');
+        if(entry.state==='retired')stale('Bank entry is already retired');
+        if(command.expectedEntryRevision!==entry.revision)stale('Stale bank entry revision');
+        entry.state='retired';entry.revision++;entry.updatedAt=new Date().toISOString();bank.revision++;return validateAnswerBank(bank);
+      });
+    },
     getQuestions:async()=>{ensureOpen();return clone(state.questions);},
     saveQuestions:async input=>mutate('questions',()=>array(clone(input))),
     getHistory:async()=>{ensureOpen();return clone(state.history);},
