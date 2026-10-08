@@ -465,3 +465,66 @@ test('scoped bank preserves a supported C++ observation for later explicit confi
  const first=await fillApplicationFields(dialog,options);assert.equal(first.questions[0].type,'number');assert.equal(first.questions[0].blocker,'missing_answer');assert.equal(first.questions[0].min,'0');assert.equal(await dialog.locator('input').inputValue(),'');
  options.answerBank=scopedBank(scopedEntry(first.questions[0],0));assert.equal((await fillApplicationFields(dialog,options)).questions.length,0);assert.equal((await verifyApplicationFields(dialog,options)).ok,true);
 });
+
+async function signedResumeForm(t){
+ const form=await setup(t);await form.page.route('http://resume.test/**',route=>route.fulfill({contentType:'text/html',body:modernApplication()}));
+ await form.page.goto('http://resume.test/');await form.page.context().addCookies([{name:'li_at',value:'synthetic-account-a',url:'http://resume.test/'}]);return form;
+}
+const nextResumeApplication=options=>({...options,applicationState:{}});
+test('verified unchanged resume is selected across applications without duplicate uploads',async t=>{
+ const {page,dialog,options,applicationState}=await signedResumeForm(t);await fillApplicationFields(dialog,options);
+ await page.locator('input[value=old-document]').check();const next=nextResumeApplication(options),result=await fillApplicationFields(dialog,next);
+ assert.deepEqual(result,{questions:[],errors:[]});assert.equal(await page.evaluate(()=>window.uploadClicks),1);
+ assert.equal(next.applicationState.actions[0].kind,'select');assert.equal(next.applicationState.resumeName,applicationState.resumeName);assert.equal(await page.locator('input[value=new-document]').isChecked(),true);
+ assert.equal((await verifyApplicationFields(dialog,next)).ok,true);
+});
+test('changed saved resume bytes get one fresh upload then reuse the changed document',async t=>{
+ const {page,dialog,options}=await signedResumeForm(t);await fillApplicationFields(dialog,options);const old=options.applicationState.resumeName;
+ await writeFile(options.resumePath,'%PDF-1.4 changed resume');const changed=nextResumeApplication(options);await fillApplicationFields(dialog,changed);
+ assert.notEqual(changed.applicationState.resumeName,old);assert.equal(await page.evaluate(()=>window.acceptedDocument.content),'%PDF-1.4 changed resume');
+ const repeat=nextResumeApplication(options);await fillApplicationFields(dialog,repeat);assert.equal(await page.evaluate(()=>window.uploadClicks),2);assert.equal(repeat.applicationState.resumeName,changed.applicationState.resumeName);
+});
+test('resume reuse never crosses an authenticated account change',async t=>{
+ const {page,dialog,options}=await signedResumeForm(t);await fillApplicationFields(dialog,options);const old=options.applicationState.resumeName;
+ await page.context().addCookies([{name:'li_at',value:'synthetic-account-b',url:'http://resume.test/'}]);
+ const changed=nextResumeApplication(options);await fillApplicationFields(dialog,changed);assert.notEqual(changed.applicationState.resumeName,old);
+ await fillApplicationFields(dialog,nextResumeApplication(options));assert.equal(await page.evaluate(()=>window.uploadClicks),2);
+});
+test('a missing verified remote resume gets one replacement upload then is reused',async t=>{
+ const {page,dialog,options}=await signedResumeForm(t);await fillApplicationFields(dialog,options);const old=options.applicationState.resumeName;
+ await page.locator('input[value=new-document]').evaluate(el=>el.parentElement.remove());const next=nextResumeApplication(options);await fillApplicationFields(dialog,next);
+ assert.notEqual(next.applicationState.resumeName,old);await fillApplicationFields(dialog,nextResumeApplication(options));assert.equal(await page.evaluate(()=>window.uploadClicks),2);
+});
+test('ambiguous verified resume copies block without uploading another duplicate',async t=>{
+ const {page,dialog,options}=await signedResumeForm(t);await fillApplicationFields(dialog,options);
+ await page.locator('input[value=new-document]').evaluate(el=>el.parentElement.parentElement.append(el.parentElement.cloneNode(true)));
+ const next=nextResumeApplication(options),result=await fillApplicationFields(dialog,next);assert.ok(result.errors.length+result.questions.length>0);
+ assert.notEqual(next.applicationState.resumeVerified,true);assert.equal(await page.evaluate(()=>window.uploadClicks),1);
+});
+test('a busy verified resume cannot be reused or cause another upload',async t=>{
+ const {page,dialog,options}=await signedResumeForm(t);await fillApplicationFields(dialog,options);await page.locator('#resume-region').evaluate(el=>el.setAttribute('aria-busy','true'));
+ const next={...nextResumeApplication(options),uploadTimeout:150},result=await fillApplicationFields(dialog,next);
+ assert.ok(result.errors.length+result.questions.length>0);assert.notEqual(next.applicationState.resumeVerified,true);assert.equal(await page.evaluate(()=>window.uploadClicks),1);
+});
+
+test('a verified selected resume satisfies its empty upload control but preserves genuine validation errors',async t=>{
+ const {page,dialog,options}=await signedResumeForm(t);await fillApplicationFields(dialog,options);
+ await page.locator('#resume-region').evaluate(area=>{area.classList.add('jobs-document-upload');const label=document.createElement('label');label.textContent='Resume';const input=document.createElement('input');input.type='file';input.required=true;input.id='empty-resume-upload';label.append(input);area.append(label);});
+ const next=nextResumeApplication(options),result=await fillApplicationFields(dialog,next);assert.deepEqual(result,{questions:[],errors:[]});assert.equal(await page.evaluate(()=>window.uploadClicks),1);
+ await page.locator('#empty-resume-upload').evaluate(el=>el.setCustomValidity('Synthetic document processing error'));
+ assert.ok((await verifyApplicationFields(dialog,next)).errors.includes('Synthetic document processing error'));
+ await page.locator('#empty-resume-upload').evaluate(el=>el.setCustomValidity(''));await page.locator('input[value=old-document]').check();assert.equal((await verifyApplicationFields(dialog,next)).ok,false);
+});
+test('an existing document from a different browser context does not create a reuse receipt',async t=>{
+ const {page,options}=await signedResumeForm(t);await fillApplicationFields(page.getByRole('dialog'),options);const original=options.applicationState.resumeName,html=await page.content();
+ const second=await page.context().browser().newPage();await second.route('http://resume.test/**',route=>route.fulfill({contentType:'text/html',body:html}));await second.goto('http://resume.test/');await second.context().addCookies([{name:'li_at',value:'synthetic-account-a',url:'http://resume.test/'}]);
+ const next=nextResumeApplication(options);await fillApplicationFields(second.getByRole('dialog'),next);assert.equal(next.applicationState.resumeVerified,true);assert.notEqual(next.applicationState.resumeName,original);assert.equal(await second.evaluate(()=>window.uploadClicks),1);
+});
+
+test('a verified resume never satisfies a separate required cover letter in its section',async t=>{
+ for(const labelText of ['Cover letter','Supporting attachment']){
+ const {page,dialog,options}=await signedResumeForm(t);await fillApplicationFields(dialog,options);
+ await page.locator('#resume-region').evaluate((area,labelText)=>{area.classList.add('jobs-document-upload');const label=document.createElement('label');label.textContent=labelText;const file=document.createElement('input');file.id='required-cover';file.type='file';file.required=true;label.append(file);area.append(label);},labelText);
+ const checked=await verifyApplicationFields(dialog,options);assert.equal(checked.ok,false);assert.ok(checked.questions.some(q=>q.label===labelText&&q.type==='file'));assert.ok(checked.errors.length>0);assert.equal(await page.locator('#required-cover').evaluate(el=>el.validity.valueMissing),true);
+ }
+});

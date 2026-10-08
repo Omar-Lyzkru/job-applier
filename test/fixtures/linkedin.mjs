@@ -1,13 +1,14 @@
 import {createServer} from 'node:http';
 
 export async function startFixture(scenario='success') {
-  const state={events:[],advances:[],entries:[],submissions:[],reviews:[],searches:[],views:[],fields:null};
+  const state={uploads:[],events:[],advances:[],entries:[],submissions:[],reviews:[],searches:[],views:[],fields:null};
   const escapeHtml=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
   const server=createServer(async(req,res)=> {
     const url=new URL(req.url,'http://localhost');
     if (url.pathname==='/events') {
       const chunks=[]; for await (const chunk of req) chunks.push(chunk);
       const event=JSON.parse(Buffer.concat(chunks).toString());
+      if(event.kind==='upload')state.uploads.push(event);
       if(event.kind==='entry')state.entries.push(event);
       if(event.kind==='advance'){state.advances.push(event);if(state.beforeAdvance)await state.beforeAdvance(event,req,res);}
       if (event.kind==='submit') {state.events.push('submit'); state.submissions.push(event.fields); state.fields=event.fields;}
@@ -67,7 +68,7 @@ export async function startFixture(scenario='success') {
       if(scenario==='description-verification')setTimeout(()=>{document.body.insertAdjacentHTML('afterbegin','<p>Complete this security check</p>');},250);
       document.addEventListener('input',()=>fetch('/events',{method:'POST',body:JSON.stringify({kind:'entry'})}));
       let values={};
-      let documents={'old-document':{name:'selected-resume.pdf',content:'old resume content'}};
+      let documents=(scenario==='resume-reuse'&&JSON.parse(localStorage.getItem('fixture-documents')||'null'))||{'old-document':{name:'selected-resume.pdf',content:'old resume content'}};
       const escape=s=>String(s).replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;');
       function collect(){
         for(const el of document.querySelectorAll(':is([role=dialog],dialog) input,:is([role=dialog],dialog) select,:is([role=dialog],dialog) textarea')){
@@ -118,14 +119,17 @@ export async function startFixture(scenario='success') {
           const area=document.createElement('section');area.className='jobs-document-upload';
           upload.closest('label').replaceWith(area);
           area.innerHTML='<h3>Resume</h3><label>Resume<input name="resume" type="file" required></label><fieldset><legend>Resume</legend><label><input type="radio" name="document" value="old-document" checked>selected-resume.pdf</label></fieldset><p role="status"></p>';
+          if(scenario==='resume-reuse')area.querySelector('fieldset').innerHTML='<legend>Resume</legend>'+Object.entries(documents).map(([id,doc])=>'<label><input type="radio" name="document" value="'+escape(id)+'"'+(id==='old-document'?' checked':'')+'>'+escape(doc.name)+'</label>').join('');
           area.querySelector('input[type=file]').onchange=async(event)=>{
             area.setAttribute('aria-busy','true');
             const file=event.target.files[0],content=await file.text();
             setTimeout(()=>{
               area.removeAttribute('aria-busy');
               if(scenario==='upload-failure'){area.querySelector('[role=status]').textContent='Upload failed';return;}
-              documents['new-upload']={name:file.name,content};
-              const label=document.createElement('label');label.innerHTML='<input type="radio" name="document" value="new-upload">'+escape(file.name);
+              const id=scenario==='resume-reuse'?'new-upload-'+Object.keys(documents).length:'new-upload';
+              documents[id]={name:file.name,content};
+              if(scenario==='resume-reuse'){localStorage.setItem('fixture-documents',JSON.stringify(documents));fetch('/events',{method:'POST',body:JSON.stringify({kind:'upload',name:file.name})});}
+              const label=document.createElement('label');label.innerHTML='<input type="radio" name="document" value="'+escape(id)+'">'+escape(file.name);
               area.querySelector('fieldset').append(label);
               const notification=area.querySelector('[role=status]');
               notification.textContent='Upload complete';
@@ -147,7 +151,7 @@ export async function startFixture(scenario='success') {
           if(current===2&&scenario==='ignored-next-once'&&!ignoredSteps.has(current)){ignoredSteps.add(current);return;}
           if(current===2&&scenario==='next-validation'){dialog.insertAdjacentHTML('beforeend','<p role="alert">Validation private-test-secret</p>');return;}
           if(current===2&&scenario==='next-busy'){dialog.setAttribute('aria-busy','true');dialog.insertAdjacentHTML('beforeend','<p role="status">Loading</p>');return;}
-          if(scenario==='answer-memory' &&current===2)await fetch('/events',{method:'POST',body:JSON.stringify({kind:'review',fields:values})});step(current+1);});
+          if(['answer-memory','resume-reuse'].includes(scenario)&&current===2)await fetch('/events',{method:'POST',body:JSON.stringify({kind:'review',fields:values})});step(current+1);});
         dialog.querySelector('#submit')?.addEventListener('click',async(event)=>{
           event.target.disabled=true;
           await fetch('/events',{method:'POST',body:JSON.stringify({kind:'submit',fields:values})});

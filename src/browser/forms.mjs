@@ -13,6 +13,7 @@ export async function discoverFields(dialog) {
   const descriptors=await dialog.evaluate(root=>{
     const controls=Array.from(root.querySelectorAll('input,select,textarea,[role="combobox"],[role="checkbox"],[role="switch"],[role="radiogroup"],[role="radio"],[role="listbox"],[role="option"],[role="spinbutton"],[role="textbox"],[contenteditable="true"]'));
     const seen=new Set(),fields=[];
+    const resumeLabel=label=>/resume|résumé|\bcv\b/i.test(label)&&! /cover\s*letter|transcript|certificate|portfolio|reference|supporting|additional|work\s*sample/i.test(label);
     const visible=el=>Boolean(el.getClientRects().length) && getComputedStyle(el).visibility!=='hidden';
     const labelText=el=>{
       const copy=el.cloneNode(true);
@@ -93,10 +94,11 @@ export async function discoverFields(dialog) {
       if(choices.size!==radios.length||new Set(Array.from(choices.values()).map(questionKey)).size!==radios.length)continue;
       modernRadioGroups.set(group,{question,radios,choices});
     }
+    for(const el of root.querySelectorAll('[data-applier-control],[data-applier-resume-picker]')){el.removeAttribute('data-applier-control');el.removeAttribute('data-applier-resume-picker');}
     controls.forEach((el,index)=>el.setAttribute('data-applier-control',String(index)));
     for(const el of controls){
       const upload=modernUploads.find(item=>item.button===el);
-      if(upload){fields.push({label:'Resume',type:'file',required:true,value:'',options:[],id:el.getAttribute('data-applier-control'),uploadButton:true,ambiguousUpload:upload.ambiguous});continue;}
+      if(upload){fields.push({label:'Resume',type:'file',required:true,value:'',options:[],id:el.getAttribute('data-applier-control'),uploadButton:true,resumeUpload:true,ambiguousUpload:upload.ambiguous});continue;}
       const native=el.matches('input,select,textarea');
       const type=native && !(el.getAttribute('role')==='combobox' && el.tagName!=='SELECT')?(el.type|| (el.tagName==='TEXTAREA'?'textarea':'unsupported')):'unsupported';
       if (el.disabled || ['hidden','submit','button','reset'].includes(type) || (!visible(el) && type!=='file'))continue;
@@ -124,11 +126,14 @@ export async function discoverFields(dialog) {
         fields.push({label:question,type:'radio',consentText:consentContext(el),documentSelection:documentChooser(el),required:parent?.getAttribute('aria-required')==='true'||group.some(input=>input.required||input.getAttribute('aria-required')==='true')||/\*/.test(question),value:group.find(input=>input.checked)?.value||'',selectedLabel:group.find(input=>input.checked)?(modern?.choices.get(group.find(input=>input.checked))||labelOf(group.find(input=>input.checked))):'',scope:parent?.querySelector('legend')?.textContent||parent?.getAttribute('aria-label')||'',options:group.map(input=>({label:modern?.choices.get(input)||labelOf(input),value:input.value,id:input.getAttribute('data-applier-control')})),id:el.getAttribute('data-applier-control')});
       }else{
         let label=labelOf(el);
-        if(type==='file' && !/resume|résumé|\bcv\b/i.test(label)){
-          const nearby=el.closest('fieldset,section,.jobs-document-upload')?.textContent||'';
-          if(/resume|résumé|\bcv\b/i.test(nearby))label='Resume';
+        if(type==='file'&&!resumeLabel(label)){
+          const explicit=el.getAttribute('aria-label')||el.getAttribute('aria-labelledby')||Array.from(el.labels||[]).some(label=>labelText(label))||el.placeholder;
+          const area=el.closest('fieldset,section,.jobs-document-upload');
+          if(!explicit&&/^(?:unlabeled field|file|upload|attachment|document|file[-_ ](?:upload|input))$/i.test(label)&&area?.querySelectorAll('input[type=file]').length===1&&resumeLabel(area.querySelector('legend,h2,h3')?.textContent||''))label='Resume';
         }
-        fields.push({label,consentText:consentContext(el),type:el.tagName==='SELECT'?'select':type,required:el.required||el.getAttribute('aria-required')==='true'||/\*/.test(label),value:type==='checkbox'?el.checked:type==='file'?Array.from(el.files||[]).map(file=>file.name).join(', '):typeof el.value==='string'?el.value:el.textContent||'',options:el.tagName==='SELECT'?Array.from(el.options).filter(option=>!option.disabled).map(option=>({label:option.textContent.trim(),value:option.value})):[],id:el.getAttribute('data-applier-control'),readOnly:Boolean(el.readOnly),selectedLabel:el.tagName==='SELECT'?el.selectedOptions[0]?.textContent.trim():'',...(el.min?{min:el.min}:{}),...(el.max?{max:el.max}:{}),...(el.step?{step:el.step}:{}),...(el.maxLength>=0?{maxLength:el.maxLength}:{}),...(el.pattern?{pattern:el.pattern}:{}),...(el.placeholder?{placeholder:el.placeholder}:{})});
+        const resumeUpload=type==='file'&&resumeLabel(label);
+        if(resumeUpload)el.setAttribute('data-applier-resume-picker','true');
+        fields.push({label,...(type==='file'?{resumeUpload}:{}),consentText:consentContext(el),type:el.tagName==='SELECT'?'select':type,required:el.required||el.getAttribute('aria-required')==='true'||/\*/.test(label),value:type==='checkbox'?el.checked:type==='file'?Array.from(el.files||[]).map(file=>file.name).join(', '):typeof el.value==='string'?el.value:el.textContent||'',options:el.tagName==='SELECT'?Array.from(el.options).filter(option=>!option.disabled).map(option=>({label:option.textContent.trim(),value:option.value})):[],id:el.getAttribute('data-applier-control'),readOnly:Boolean(el.readOnly),selectedLabel:el.tagName==='SELECT'?el.selectedOptions[0]?.textContent.trim():'',...(el.min?{min:el.min}:{}),...(el.max?{max:el.max}:{}),...(el.step?{step:el.step}:{}),...(el.maxLength>=0?{maxLength:el.maxLength}:{}),...(el.pattern?{pattern:el.pattern}:{}),...(el.placeholder?{placeholder:el.placeholder}:{})});
       }
     }
     return fields;
@@ -149,17 +154,65 @@ async function setNativeChecked(dialog,locator,value,signal,timeout=10000){
  checkStopped(signal);
  // Caller verifies a freshly discovered semantic control after any native change.
 }
+// Receipts exist only for byte-verified uploads in this browser/authentication session.
+// A document with the same original filename never creates a receipt.
+const resumeReceipts=new WeakMap();
+async function resumeRegistry(dialog){
+  const page=dialog.page(),context=page.context();
+  const cookies=await context.cookies(page.url()).catch(()=>[]);
+  const auth=cookies.filter(cookie=>cookie.name==='li_at'&&cookie.value);
+  if(auth.length!==1){resumeReceipts.delete(context);return null;}
+  const session=createHash('sha256').update(JSON.stringify([auth[0].domain,auth[0].path,auth[0].value])).digest('hex');
+  let registry=resumeReceipts.get(context);
+  if(!registry||registry.session!==session){registry={session,files:new Map()};resumeReceipts.set(context,registry);}
+  return registry;
+}
+async function selectedResume(dialog,filename,{signal,end}){
+  while(Date.now()<end){
+    checkStopped(signal);
+    const choices=(await discoverFields(dialog)).filter(item=>item.field.documentSelection)
+      .flatMap(item=>item.radios||[]).filter(option=>option.label.includes(filename));
+    if(choices.length>1)throw new Error('More than one matching résumé document was found');
+    if(choices.length===1){
+      const choice=choices[0];
+      const busy=await choice.locator.evaluate(el=>{
+        const area=el.closest('[data-applier-resume-region],.jobs-document-upload,.jobs-resume-upload,section,fieldset');
+        return Boolean(area?.closest('[aria-busy="true"]') || area?.querySelector('[aria-busy="true"],[role="progressbar"]'));
+      });
+      if(!busy){
+        await setNativeChecked(dialog,choice.locator,true,signal);
+        const freshChoices=(await discoverFields(dialog)).filter(item=>item.field.documentSelection).flatMap(item=>item.radios||[]).filter(option=>option.label.includes(filename));
+        if(freshChoices.length===1&&await freshChoices[0].locator.isChecked()){
+          return;
+        }
+      }
+    }
+    await new Promise(resolve=>setTimeout(resolve,50));
+  }
+  throw new Error('Résumé was not confirmed as the selected application document');
+}
 async function uploadResume(dialog,entry,{resumePath,signal,applicationState,uploadTimeout}) {
   if(!resumePath)throw new Error('No selected résumé');
   if(entry.ambiguousUpload)throw new Error('More than one résumé upload action was found');
   checkStopped(signal);
   const end=Date.now()+uploadTimeout;
-  // A fresh unique filename identifies this exact upload. Reusing an employer's
-  // old same-named document can never satisfy the acceptance check below.
   const extension=extname(resumePath).toLowerCase();
-  const filename=`${basename(resumePath,extname(resumePath)).slice(0,140)}-applier-${randomUUID()}${extension}`;
+  let filename=`${basename(resumePath,extname(resumePath)).slice(0,140)}-applier-${randomUUID()}${extension}`;
   const mimeType={'.pdf':'application/pdf','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}[extension];
-  const payload={name:filename,mimeType,buffer:await readFile(resumePath)};
+  const buffer=await readFile(resumePath),fingerprint=createHash('sha256').update(extension).update('\0').update(buffer).digest('hex');
+  const registry=await resumeRegistry(dialog),known=registry?.files.get(fingerprint);
+  const confirm=async(reused)=>{
+    await selectedResume(dialog,filename,{signal,end});checkStopped(signal);
+    if(await resumeRegistry(dialog)!==registry)throw new Error('The signed-in session changed while selecting the résumé');
+    applicationState.resumeName=filename;applicationState.resumeVerified=true;applicationState.resumeReused=reused;
+    if(registry){registry.files.set(fingerprint,filename);if(registry.files.size>8)registry.files.delete(registry.files.keys().next().value);}
+  };
+  if(known){
+    const choices=(await discoverFields(dialog)).filter(item=>item.field.documentSelection).flatMap(item=>item.radios||[]).filter(option=>option.label.includes(known));
+    if(choices.length){filename=known;await confirm(true);return;}
+    registry.files.delete(fingerprint);
+  }
+  const payload={name:filename,mimeType,buffer};
   checkStopped(signal);
   if(entry.uploadButton){
     const page=dialog.page();
@@ -175,27 +228,7 @@ async function uploadResume(dialog,entry,{resumePath,signal,applicationState,upl
     });
     checkStopped(signal);await chooser.setFiles(payload,{timeout:Math.max(1,end-Date.now())});
   }else await entry.locator.setInputFiles(payload,{timeout:Math.max(1,end-Date.now())});
-  while(Date.now()<end){
-    checkStopped(signal);
-    const choices=(await discoverFields(dialog)).filter(item=>item.field.documentSelection)
-      .flatMap(item=>item.radios||[]).filter(option=>option.label.includes(filename));
-    if(choices.length===1){
-      const choice=choices[0];
-      const busy=await choice.locator.evaluate(el=>{
-        const area=el.closest('[data-applier-resume-region],.jobs-document-upload,.jobs-resume-upload,section,fieldset');
-        return Boolean(area?.closest('[aria-busy="true"]') || area?.querySelector('[aria-busy="true"],[role="progressbar"]'));
-      });
-      if(!busy){
-        await setNativeChecked(dialog,choice.locator,true,signal);
-        const freshChoices=(await discoverFields(dialog)).filter(item=>item.field.documentSelection).flatMap(item=>item.radios||[]).filter(option=>option.label.includes(filename));
-        if(freshChoices.length===1&&await freshChoices[0].locator.isChecked()){
-          applicationState.resumeName=filename;applicationState.resumeVerified=true;return;
-        }
-      }
-    }
-    await new Promise(resolve=>setTimeout(resolve,50));
-  }
-  throw new Error('Upload was not confirmed as the selected application document');
+  await confirm(false);
 }
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -244,7 +277,7 @@ export async function verifyApplicationFields(dialog,options={}){
  for(const entry of fields){
   checkStopped(options.signal);const f=entry.field;
   if(f.documentSelection){const matches=entry.radios?.filter(o=>state.resumeVerified&&o.label.includes(state.resumeName))||[];if(matches.length!==1||!await matches[0].locator.evaluateAll(inputs=>inputs.length===1&&inputs[0].checked))add(f,'Could not verify the selected résumé','resume_upload');continue;}
-  if(f.type==='file'){if(/resume|résumé|\bcv\b/i.test(f.label)){const current=state.resumeVerified&&await entry.locator.evaluateAll((elements,name)=>{
+  if(f.type==='file'){if(f.resumeUpload){const current=state.resumeVerified&&await entry.locator.evaluateAll((elements,name)=>{
       if(elements.length!==1)return false;const el=elements[0];
       const area=el.closest('[data-applier-resume-region],.jobs-document-upload,.jobs-resume-upload,section,fieldset')||el.parentElement;
       const matches=Array.from(area?.querySelectorAll('input[type=radio]')||[]).filter(radio=>[radio.getAttribute('aria-label')||'',...(radio.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.textContent||''),...Array.from(radio.labels||[]).map(label=>label.textContent)].some(label=>label.includes(name)));
@@ -270,10 +303,10 @@ export async function fillApplicationFields(dialog,options){
  const end=Date.now()+actionTimeout,failures=new Map();let uploadError=null;
  const remaining=()=>Math.max(1,end-Date.now());
  const trace=(kind,retries,start)=>{applicationState.actions ||= [];if(applicationState.actions.length<100)applicationState.actions.push({kind,retries,durationMs:Math.min(60000,Math.max(0,Date.now()-start))});};
- for(const entry of (await discoverFields(dialog)).filter(e=>e.field.type==='file'&&/resume|résumé|\bcv\b/i.test(e.field.label))){
+ for(const entry of (await discoverFields(dialog)).filter(e=>e.field.type==='file'&&e.field.resumeUpload)){
   const start=Date.now(),needed=!applicationState.resumeVerified;
   try{if(needed)await uploadResume(dialog,entry,{resumePath,signal,applicationState,uploadTimeout:Math.min(uploadTimeout,remaining())});}
-  catch(error){checkStopped(signal);uploadError=`Résumé: ${error.message.split('\n')[0]}`;}finally{if(needed)trace('upload',0,start);}
+  catch(error){checkStopped(signal);uploadError=`Résumé: ${error.message.split('\n')[0]}`;}finally{if(needed)trace(applicationState.resumeReused?'select':'upload',0,start);}
  }
  for(let pass=0;pass<maxPasses&&Date.now()<end;pass++){
   checkStopped(signal);let acted=false;const scanned=await discoverFields(dialog);
@@ -314,11 +347,21 @@ export async function fillApplicationFields(dialog,options){
  }
  const final=await verifyApplicationFields(dialog,options);return {questions:final.questions,errors:uploadError?[uploadError]:final.errors,blockers:[makeBlocker('form_changed',{phase:'form'}),...final.blockers]};
 }
-export async function validationErrors(dialog,{resumeVerified=false}={}) {
-  return dialog.evaluate((root,resumeVerified)=>{
+export async function validationErrors(dialog,{resumeVerified=false,resumeName=null}={}) {
+  return dialog.evaluate((root,{resumeVerified,resumeName})=>{
     const visible=el=>Boolean(el.getClientRects().length);
     const errors=Array.from(root.querySelectorAll('[role="alert"],.artdeco-inline-feedback__message,.fb-dash-form-element__error-message')).filter(visible).map(el=>el.textContent.trim()).filter(message=>message && !(resumeVerified && /^r[eé]sum[eé] uploaded successfully[.!]?$/i.test(message.replace(/\s+/g,' '))));
-    for(const el of root.querySelectorAll('input,select,textarea'))if(visible(el)&&!el.disabled&&el.willValidate&&!el.checkValidity())errors.push(el.validationMessage||'A required field is incomplete');
+    for(const el of root.querySelectorAll('input,select,textarea'))if(visible(el)&&!el.disabled&&el.willValidate&&!el.checkValidity()){
+      // An upload picker adds files; an accepted selected document satisfies the résumé.
+      // Keep custom processing errors and every unrelated control's native validation.
+      if(el.type==='file'&&el.getAttribute('data-applier-resume-picker')==='true'&&el.validity.valueMissing&&!el.validity.customError&&resumeVerified&&resumeName){
+        const area=el.closest('[data-applier-resume-region],.jobs-document-upload,.jobs-resume-upload,section,fieldset');
+        const matches=Array.from(area?.querySelectorAll('input[type=radio]')||[]).filter(radio=>[radio.getAttribute('aria-label')||'',...(radio.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.textContent||''),...Array.from(radio.labels||[]).map(label=>label.textContent)].some(label=>label.includes(resumeName)));
+        const busy=area?.closest('[aria-busy="true"]')||area?.querySelector('[aria-busy="true"],[role="progressbar"]');
+        if(matches.length===1&&matches[0].checked&&!busy)continue;
+      }
+      errors.push(el.validationMessage||'A required field is incomplete');
+    }
     return [...new Set(errors)];
-  },resumeVerified===true);
+  },{resumeVerified:resumeVerified===true,resumeName});
 }

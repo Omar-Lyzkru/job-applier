@@ -786,3 +786,71 @@ with checksum verification before native scratch cleanup and worktree archival.
 Only this plan's scratch/checkout is cleaned up. Phase 3B is complete; STOP before
 3C until separately approved. Live LinkedIn layouts are not verified by these
 local synthetic browser tests. Existing manual context/control limits remain.
+
+
+## Maintenance — résumé duplication (2026-10-07)
+
+User approved a focused upload correction after 3B; Phase 3C stays paused.
+Baseline: 242/242 unit/API. A synthetic probe reproduced two uploads of unchanged
+bytes for two applications. The application state reset per job while fresh
+UUID filenames forced another accepted copy each time.
+
+Résumé reuse receipts are private in-memory records scoped to browser context
+and a hash of its authenticated session. File bytes plus extension identify the
+saved source. Only a successfully accepted, selected app upload creates a receipt;
+a matching original filename or a record from another browser/login cannot.
+Each application scans current document controls, selects the uniquely matching
+known copy and verifies it again. Changed bytes/missing cards need a fresh upload;
+ambiguous/busy copies block without adding duplicates. Session changes during
+selection fail closed. No receipt, session cookie or digest is written to logs,
+diagnostics, applicant history or Git. Up to eight versions are retained in memory.
+
+Six duplication/content/account/missing/busy/ambiguity regressions failed first,
+then passed. Multi-job integration also exposed the empty required upload picker's
+native valueMissing error despite a selected accepted document; that error is
+ignored only for a verified unique selected document in the same nonbusy résumé
+region. Custom processing errors and other native/unsupported fields still block.
+A widget change exposed stale internal marker collisions; discovery clears old
+control markers before assigning the current controls. Focused integration and
+validation cases pass 3/3. A separate browser context requires its own fresh proof.
+Reused selection actions are measured as select, not upload.
+
+Modified: src/browser/forms.mjs, test/forms.test.mjs, test/adapter.test.mjs,
+test/fixtures/linkedin.mjs, README.md and this verification file. Post-review complete suites are running. Tests use local synthetic bytes/forms; no
+signed-in applicant profile or live application is touched. Existing remote copies
+remain; first use after browser restart/login change may add one fresh copy.
+
+
+One independent read-only review found one Important issue, no Critical/Minor
+issues: the new empty-file validation exemption could admit an unrelated cover
+letter in a shared section because an old nearby-text fallback relabelled it.
+Synthetic required cover-letter regression failed with ok=true; the fix keeps
+explicit labels, permits nearby résumé fallback only for a sole generically named
+unlabelled picker, and marks positively identified résumé controls. Only those
+controls can upload/reuse or receive the narrow empty-picker exemption. Required
+cover-letter and supporting-attachment inputs keep blockers/native errors. Focused
+post-fix integration/validation tests pass 4/4; complete suites rerun afterward.
+
+Review items set aside and root decisions:
+- Live LinkedIn layout/cookie rotation: synthetic tests prove boundaries and
+  cookie changes invalidate receipts; live account verification remains deferred.
+  Cost: current live layout/auth differences may prevent reuse and require upkeep.
+- Remote bytes manually replaced under an unchanged verified generated filename:
+  keep the explicitly approved same-session receipt boundary; arbitrary older
+  same-named files are not trusted. Cost: manual remote replacement with that
+  exact generated name requires clearing the browser session to renew proof.
+- Account-change hardening after completed résumé selection: existing final
+  account/submission behavior is unchanged by this fix. Cost: existing concurrent
+  manual login changes during an application remain outside this tested boundary.
+- Phase 3C: remains paused as explicitly required. Cost: legacy import remains
+  unavailable until separately approved.
+No additional confirmed finding from busy-after-selection: whole form verification
+blocks busy forms; selection/Stop checks remain in place. No new deferred minors.
+
+
+Final post-review verification: **242/242 unit/API** and **175/175 browser**,
+zero failures; browser duration 324254 ms. Earlier pre-review browser run passed
+174/174; its log and reproduced failed regressions are retained privately. Changed
+JavaScript syntax and git diff whitespace checks pass. One Important review
+finding fixed with RED→GREEN tests; no newly deferred Minor findings. Product
+is ready for the previously authorized maintenance delivery; 3C remains paused.

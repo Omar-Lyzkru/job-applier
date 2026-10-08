@@ -579,3 +579,15 @@ test('browser: an exposed resume region without current choices during pacing pr
 test('browser: a validated page counter advances reused controls and refills their reset values',async t=>{
  const {adapter,fixture,options}=await setup(t,'reused-page-progress',{action:1000});const result=await adapter.apply(job,options);assert.equal(result.status,'submitted',JSON.stringify(result));assert.deepEqual(fixture.state.advances.map(event=>event.step),[1,2]);assert.equal(fixture.state.submissions.length,1);assert.equal(fixture.state.submissions[0].first,'Test');assert.deepEqual(fixture.state.events,['guard','submit']);
 });
+
+test('browser: separate jobs reuse the same accepted saved resume without another upload',async t=>{
+ const {adapter,fixture,options}=await setup(t,'resume-reuse');const page=await adapter.openBrowser();await page.context().addCookies([{name:'li_at',value:'synthetic-account-a',url:fixture.url}]);
+ for(const id of ['1001','1002']){const result=await adapter.apply({...job,id},{...options,dryRun:true});assert.equal(result.status,'ready',JSON.stringify(result));}
+ assert.equal(fixture.state.uploads.length,1);assert.equal(fixture.state.reviews.length,2);assert.equal(fixture.state.reviews[1].resume,fixture.state.reviews[0].resume);assert.equal(fixture.state.reviews[1].resumeContent,'%PDF-1.4\nfixture');assert.deepEqual(fixture.state.submissions,[]);
+});
+test('browser: a changed saved resume replaces bytes once and later jobs reuse that version',async t=>{
+ const {adapter,fixture,options,resumePath}=await setup(t,'resume-reuse');const page=await adapter.openBrowser();await page.context().addCookies([{name:'li_at',value:'synthetic-account-a',url:fixture.url}]);
+ assert.equal((await adapter.apply(job,{...options,dryRun:true})).status,'ready');await writeFile(resumePath,'%PDF-1.4 changed saved version');
+ for(const id of ['1002','1003']){const result=await adapter.apply({...job,id},{...options,dryRun:true});assert.equal(result.status,'ready',JSON.stringify(result));}
+ assert.equal(fixture.state.uploads.length,2);assert.equal(fixture.state.reviews[1].resumeContent,'%PDF-1.4 changed saved version');assert.equal(fixture.state.reviews[2].resume,fixture.state.reviews[1].resume);assert.notEqual(fixture.state.reviews[0].resume,fixture.state.reviews[1].resume);
+});
