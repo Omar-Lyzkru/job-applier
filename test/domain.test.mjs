@@ -1,3 +1,4 @@
+import {projectAttention} from '../src/attention-queue.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {defaultConfig, validateConfig, readiness, normalizeQuestion, resolveAnswer, matchesJob, dayKey, countsTowardCap, blocksRetry} from '../src/domain.mjs';
@@ -397,4 +398,40 @@ test('screening sponsorship periods never derive from one another and boolean co
  for(const label of ['If hired, do you currently require sponsorship to work in the US?','Do you currently require sponsorship to work in Canada?','Are you a US citizen?'])assert.equal(resolveAnswer({...now,label},{},bank).kind,'missing');
  assert.equal(resolveAnswer({label:labels[2],type:'text'},{},{[normalizeQuestion(labels[0])]:false,[normalizeQuestion(labels[1])]:false}).kind,'missing');
  assert.equal(describeQuestion(now).screening.qualifiers.timeScope,'now');
+});
+
+import {scopedEntry,scopedBank} from './fixtures/scoped-bank.mjs';
+import {explainScreeningResolution} from '../src/screening-intelligence.mjs';
+test('scoped answers exact precedence conflicts ownership and legacy scope isolation',()=>{
+ const field={label:'School',type:'text',jobId:'123',company:'Example'},a=scopedEntry(field,'New');
+ const solve=(f,entries,legacy={school:'Old'})=>resolveAnswer(f,{},legacy,{answerBank:scopedBank(...entries),now:'2026-10-07T13:00:00.000Z'});
+ assert.equal(solve(field,[a]).answer,'New');assert.equal(solve({...field,jobId:'456'},[a]).answer,'Old');
+ assert.equal(solve(field,[a,scopedEntry(field,'Other',{kind:'employer',employerIdentity:'example'})]).kind,'missing');
+ for(const e of [{...a,state:'retired'},{...a,expiresAt:'2026-10-07T12:30:00.000Z'}])assert.equal(solve(field,[e]).kind,'missing');
+ assert.equal(solve({...field,maxLength:2},[a]).kind,'missing');
+ const equivalent=scopedEntry({...field,label:'University name'},'Different',{kind:'concept',intent:'school',qualifiers:{educationStatus:'current'}});
+ assert.equal(solve(field,[equivalent]).answer,'Old');
+ assert.equal(solve(field,[equivalent],{'name of your university':'Other'}).kind,'missing');
+ assert.equal(resolveAnswer({label:'Email',type:'email',jobId:'123'},{email:'test@example.com'},{},{answerBank:scopedBank(a)}).answer,'test@example.com');
+});
+test('scoped answers distinguish independently confirmed C++ from collapsed legacy keys',()=>{
+ const field={label:'Years of C++ experience',type:'number',jobId:'123',company:'Example',min:'0'},bank=scopedBank(scopedEntry(field,0));
+ const result=resolveAnswer(field,{}, {'years of c experience':7},{answerBank:bank});assert.equal(result.kind,'fill');assert.equal(result.answer,0);assert.equal(result.bankRevision,1);assert.equal(result.answerScope.jobId,'123');assert.equal(explainScreeningResolution(field,result).decision,'compatible');
+ for(const label of ['Years of C# experience','Years of C experience'])assert.equal(resolveAnswer({...field,label},{},{'years of c experience':7},{answerBank:bank}).kind,'missing');
+ assert.equal(resolveAnswer(field,{},{'years of c experience':7}).manual,true);
+});
+test('scoped answers honor typed false and zero and numeric text date constraints',()=>{
+ const field={label:'Would you relocate?',type:'checkbox',jobId:'123'};
+ assert.equal(resolveAnswer(field,{},{},{answerBank:scopedBank(scopedEntry(field,false))}).value,false);
+ const n={label:'Years of professional Python experience',type:'number',min:'0',max:'10',step:'2',jobId:'123'};
+ for(const value of [-1,11,3])assert.equal(resolveAnswer(n,{},{},{answerBank:scopedBank(scopedEntry(n,value))}).kind,'missing');
+ const text={label:'Reference code',type:'text',pattern:'[A-Z]{2}',jobId:'123'};assert.equal(resolveAnswer(text,{},{},{answerBank:scopedBank(scopedEntry(text,'123'))}).kind,'missing');
+ const date={label:'Expected graduation',type:'text',placeholder:'MM/YYYY',jobId:'123'};assert.equal(resolveAnswer(date,{},{},{answerBank:scopedBank(scopedEntry(date,'Spring 2028'))}).kind,'missing');
+});
+test('scoped answers readiness agrees with resolution and never clears protected attempts',()=>{
+ const q={label:'School',type:'text',jobId:'123',blocker:'missing_answer'},bank=scopedBank(scopedEntry(q,'UH'));
+ const pending=[q],job={id:'123',company:'Example'},record={id:'parent',job,status:'needs_answer',attemptedAt:null};
+ const ready=projectAttention([record],pending,{answerBank:bank})[0];assert.equal(ready.singleRetry,true);assert.equal(ready.answerProgress.unanswered,0);
+ for(const status of ['unconfirmed','submission_pending','submitted']){const result=projectAttention([{...record,status,attemptedAt:'2026-10-07T12:00:00Z'}],pending,{answerBank:bank});assert.equal(result.some(r=>r.singleRetry),false);}
+ assert.equal(projectAttention([record],[{...q,type:'unsupported'}],{answerBank:bank})[0].singleRetry,false);
 });

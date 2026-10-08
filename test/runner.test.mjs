@@ -368,3 +368,18 @@ test('a daily cap filled during pacing prevents reservation and validation',asyn
 test('a real write failure before filling prevents browser entry and preserves interrupted work',async t=>{
  const {runner,store,adapter,dir,observed}=await setup(t,{count:1});const original=adapter.inspect;adapter.inspect=async(...args)=>{const details=await original(...args);await rename(join(dir,'history.json'),join(dir,'history.saved'));await mkdir(join(dir,'history.json'));return details;};await runner.start();await runner.waitForIdle();assert.equal(observed.applications.length,0);assert.equal(runner.getStatus().state,'paused');await rm(join(dir,'history.json'),{recursive:true});await rename(join(dir,'history.saved'),join(dir,'history.json'));await store.close();const reopened=await createStore(dir);t.after(()=>reopened.close());await reopened.recoverWork();assert.equal((await reopened.getHistory())[0].status,'interrupted');assert.equal((await reopened.getHistory())[0].attemptedAt,null);
 });
+
+import {describeBankQuestion} from '../src/answer-bank.mjs';
+const runnerBankCommand=(value,revision)=>({expectedBankRevision:revision,question:describeBankQuestion({label:'School',type:'text'}),sourceQuestion:'School',scope:{kind:'concept',intent:'school',qualifiers:{educationStatus:'current'}},value,confirmed:true,provenance:{jobId:'1001',recordId:'observed'}});
+test('scoped bank run freezes revisions through inspection entry verification and later jobs',async t=>{
+ const {store,runner,adapter}=await setup(t,{count:2,config:{dryRun:true}});const initial=await store.saveBankEntry(runnerBankCommand('First',0));const seen=[];
+ const inspect=adapter.inspect;adapter.inspect=async job=>{if(job.id==='1001')await store.saveBankEntry({...runnerBankCommand('Second',1),entryId:initial.entries[0].id,expectedEntryRevision:1});return inspect(job);};
+ adapter.apply=async(job,options)=>{seen.push([options.answerBank.revision,options.answerBank.entries[0].value]);if(seen.length===1)await store.saveBankEntry({...runnerBankCommand('Third',2),entryId:initial.entries[0].id,expectedEntryRevision:2});options.answerBank.entries[0].value='Caller mutation';return {status:'ready',cleanup:{confirmed:true}};};
+ await runner.start();await runner.waitForIdle();assert.deepEqual(seen,[[1,'First'],[1,'First']]);
+ adapter.inspect=inspect;await runner.start();await runner.waitForIdle();assert.deepEqual(seen.slice(2),[[3,'Third'],[3,'Third']]);assert.equal((await store.getAnswerBank()).entries[0].value,'Third');
+});
+test('scoped bank stale revision before retry claim cannot apply or reserve',async t=>{
+ const {store,runner,observed,jobs}=await setup(t,{count:1});const parent=await store.createRecord(jobs[0],'failed');
+ const create=store.createWork;store.createWork=async(job,options)=>{if(options.parentId)await store.saveBankEntry(runnerBankCommand('Changed',0));return create(job,options);};
+ await assert.rejects(runner.retry({recordIds:[parent.id]}),/stale.*bank/i);assert.equal(observed.applications.length,0);assert.equal((await store.getHistory()).length,1);assert.equal((await store.getHistory()).some(r=>r.attemptedAt),false);
+});

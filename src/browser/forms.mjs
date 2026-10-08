@@ -18,6 +18,12 @@ export async function discoverFields(dialog) {
       copy.querySelectorAll('input,select,textarea,[aria-hidden="true"]').forEach(control=>control.remove());
       return copy.textContent.trim();
     };
+    const consentContext=el=>{
+      const area=el.closest('fieldset,.fb-dash-form-element');
+      if(!area||area.querySelectorAll('fieldset').length)return undefined;
+      const text=labelText(area);
+      return /\b(?:sms|text messages?|consent)\b/i.test(text)&&text.length<=4000?text:undefined;
+    };
     const labelOf=el=>{
       const ids=(el.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean);
       const aria=ids.map(id=>{const label=document.getElementById(id);return label?labelText(label):'';}).join(' ').trim();
@@ -114,21 +120,21 @@ export async function discoverFields(dialog) {
         const modern=modernRadioGroups.get(parent);
         const group=modern?.radios||controls.filter(input=>input.type==='radio' && (input.name||input.id)===name);
         const question=modern?.question||parent?.querySelector('legend,[id$="label"],.fb-dash-form-element__label')?.textContent.trim() || parent?.getAttribute('aria-label') || name;
-        fields.push({label:question,type:'radio',documentSelection:documentChooser(el),required:parent?.getAttribute('aria-required')==='true'||group.some(input=>input.required||input.getAttribute('aria-required')==='true')||/\*/.test(question),value:group.find(input=>input.checked)?.value||'',selectedLabel:group.find(input=>input.checked)?(modern?.choices.get(group.find(input=>input.checked))||labelOf(group.find(input=>input.checked))):'',scope:parent?.querySelector('legend')?.textContent||parent?.getAttribute('aria-label')||'',options:group.map(input=>({label:modern?.choices.get(input)||labelOf(input),value:input.value,id:input.getAttribute('data-applier-control')})),id:el.getAttribute('data-applier-control')});
+        fields.push({label:question,type:'radio',consentText:consentContext(el),documentSelection:documentChooser(el),required:parent?.getAttribute('aria-required')==='true'||group.some(input=>input.required||input.getAttribute('aria-required')==='true')||/\*/.test(question),value:group.find(input=>input.checked)?.value||'',selectedLabel:group.find(input=>input.checked)?(modern?.choices.get(group.find(input=>input.checked))||labelOf(group.find(input=>input.checked))):'',scope:parent?.querySelector('legend')?.textContent||parent?.getAttribute('aria-label')||'',options:group.map(input=>({label:modern?.choices.get(input)||labelOf(input),value:input.value,id:input.getAttribute('data-applier-control')})),id:el.getAttribute('data-applier-control')});
       }else{
         let label=labelOf(el);
         if(type==='file' && !/resume|résumé|\bcv\b/i.test(label)){
           const nearby=el.closest('fieldset,section,.jobs-document-upload')?.textContent||'';
           if(/resume|résumé|\bcv\b/i.test(nearby))label='Resume';
         }
-        fields.push({label,type:el.tagName==='SELECT'?'select':type,required:el.required||el.getAttribute('aria-required')==='true'||/\*/.test(label),value:type==='checkbox'?el.checked:type==='file'?Array.from(el.files||[]).map(file=>file.name).join(', '):typeof el.value==='string'?el.value:el.textContent||'',options:el.tagName==='SELECT'?Array.from(el.options).filter(option=>!option.disabled).map(option=>({label:option.textContent.trim(),value:option.value})):[],id:el.getAttribute('data-applier-control'),readOnly:Boolean(el.readOnly),selectedLabel:el.tagName==='SELECT'?el.selectedOptions[0]?.textContent.trim():'',...(el.min?{min:el.min}:{}),...(el.max?{max:el.max}:{}),...(el.step?{step:el.step}:{}),...(el.maxLength>=0?{maxLength:el.maxLength}:{}),...(el.pattern?{pattern:el.pattern}:{}),...(el.placeholder?{placeholder:el.placeholder}:{})});
+        fields.push({label,consentText:consentContext(el),type:el.tagName==='SELECT'?'select':type,required:el.required||el.getAttribute('aria-required')==='true'||/\*/.test(label),value:type==='checkbox'?el.checked:type==='file'?Array.from(el.files||[]).map(file=>file.name).join(', '):typeof el.value==='string'?el.value:el.textContent||'',options:el.tagName==='SELECT'?Array.from(el.options).filter(option=>!option.disabled).map(option=>({label:option.textContent.trim(),value:option.value})):[],id:el.getAttribute('data-applier-control'),readOnly:Boolean(el.readOnly),selectedLabel:el.tagName==='SELECT'?el.selectedOptions[0]?.textContent.trim():'',...(el.min?{min:el.min}:{}),...(el.max?{max:el.max}:{}),...(el.step?{step:el.step}:{}),...(el.maxLength>=0?{maxLength:el.maxLength}:{}),...(el.pattern?{pattern:el.pattern}:{}),...(el.placeholder?{placeholder:el.placeholder}:{})});
       }
     }
     return fields;
   });
   return descriptors.map(descriptor=>{
     const {id,readOnly,uploadButton,ambiguousUpload,...field}=descriptor;
-    return {field:{...field,key:normalizeQuestion(field.label)},readOnly,uploadButton,ambiguousUpload,locator:dialog.locator(`[data-applier-control="${id}"]`),radios:descriptor.type==='radio'?descriptor.options.map(option=>({...option,locator:dialog.locator(`[data-applier-control="${option.id}"]`)})):null};
+    return {field:{...field,readOnly:Boolean(readOnly),key:normalizeQuestion(field.label)},readOnly,uploadButton,ambiguousUpload,locator:dialog.locator(`[data-applier-control="${id}"]`),radios:descriptor.type==='radio'?descriptor.options.map(option=>({...option,locator:dialog.locator(`[data-applier-control="${option.id}"]`)})):null};
   });
 }
 function hasValue(field) {return field.type==='checkbox'?field.value===true:String(field.value||'').trim()!=='';}
@@ -193,10 +199,10 @@ async function uploadResume(dialog,entry,{resumePath,signal,applicationState,upl
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function fieldIdentity(field){return hash([field.label,field.type,field.scope||'',Boolean(field.required),field.pattern||'',field.placeholder||'',field.min||'',field.max||'',field.step||'',field.maxLength??null,(field.options||[]).map(option=>option.label)]);}
-function questionFor(field,company,reason,blocker='operational',suggestions=[]){return {key:field.key,label:field.label,type:field.type,required:field.required,company,answerKey:savedAnswerKey({...field,company}),options:field.options.map(({label,value})=>({label,value})),...(field.pattern?{pattern:field.pattern}:{}),...(field.placeholder?{placeholder:field.placeholder}:{}),reason,blocker,suggestions};}
+function questionFor(field,company,reason,blocker='operational',suggestions=[]){return {...Object.fromEntries(['readOnly','min','max','step','maxLength','consentText','jobId'].filter(k=>field[k]!==undefined).map(k=>[k,field[k]])),key:field.key,label:field.label,type:field.type,required:field.required,company,answerKey:savedAnswerKey({...field,company}),options:field.options.map(({label,value})=>({label,value})),...(field.pattern?{pattern:field.pattern}:{}),...(field.placeholder?{placeholder:field.placeholder}:{}),reason,blocker,suggestions};}
 function desired(entry,options){
- const field={...entry.field,company:options.company||''};if(field.documentSelection||field.type==='file'||field.type==='unsupported')return null;
- const answer=resolveAnswer(field,options.profile||{},options.answers||{});
+ const field={...entry.field,company:options.company||'',jobId:options.jobId};if(field.documentSelection||field.type==='file'||field.type==='unsupported')return null;
+ const answer=resolveAnswer(field,options.profile||{},options.answers||{},{answerBank:options.answerBank});
  if(answer.kind==='fill')return answer;
  if(field.required||answer.manual)return null;
  if(field.type==='checkbox')return {kind:'fill',value:false};
@@ -233,7 +239,7 @@ export async function verifyApplicationFields(dialog,options={}){
  checkStopped(options.signal);const fields=await discoverFields(dialog),questions=[],blockers=[],errors=[];
  const company=options.company||'',state=options.applicationState||{},identities=new Map();
  for(const e of fields){const id=fieldIdentity(e.field);identities.set(id,(identities.get(id)||0)+1);}
- const add=(field,reason,code,suggestions=[])=>{questions.push(questionFor(field,company,reason,code==='missing_answer'?'missing_answer':'operational',suggestions));blockers.push(makeBlocker(code,{phase:'form',controlFingerprint:fieldIdentity(field)}));};
+ const add=(field,reason,code,suggestions=[])=>{questions.push(questionFor({...field,jobId:options.jobId},company,reason,code==='missing_answer'?'missing_answer':'operational',suggestions));blockers.push(makeBlocker(code,{phase:'form',controlFingerprint:fieldIdentity(field)}));};
  for(const entry of fields){
   checkStopped(options.signal);const f=entry.field;
   if(f.documentSelection){const matches=entry.radios?.filter(o=>state.resumeVerified&&o.label.includes(state.resumeName))||[];if(matches.length!==1||!await matches[0].locator.isChecked())add(f,'Could not verify the selected résumé','resume_upload');continue;}
@@ -244,7 +250,7 @@ export async function verifyApplicationFields(dialog,options={}){
     },state.resumeName);if(!current)add(f,'The selected résumé has not been verified','resume_upload');}else if(f.required||hasValue(f))add(f,'This upload needs a file the app does not have','unsupported_control');continue;}
   if(identities.get(fieldIdentity(f))!==1){add(f,'More than one compatible field was found','form_changed');continue;}
   if(f.type==='unsupported'){if(f.required||hasValue(f))add(f,'This control is not supported automatically','unsupported_control');continue;}
-  const answer=resolveAnswer({...f,company},options.profile||{},options.answers||{}),target=desired(entry,options);
+  const answer=resolveAnswer({...f,company,jobId:options.jobId},options.profile||{},options.answers||{},{answerBank:options.answerBank}),target=desired(entry,options);
   if(answer.kind==='missing'&&f.required){add(answer.manual?{...f,type:'unsupported'}:f,answer.reason,answer.manual?'unsupported_control':'missing_answer',answer.suggestions);continue;}
   if(answer.manual&&(f.required||hasValue(f))){add({...f,type:'unsupported'},answer.reason,'unsupported_control',answer.suggestions);continue;}
   if(!target){if(hasValue(f))add(f,'Unknown prefilled answer cannot be cleared safely','entry_verification');continue;}

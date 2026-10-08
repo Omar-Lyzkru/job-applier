@@ -339,10 +339,10 @@ export function createLinkedInAdapter({dataDir,headless=false,fixtureBaseUrl=nul
         return {description,...await postingMetadata(page),alreadyApplied:await page.getByText(/^(Application submitted|Applied)$/i).first().isVisible().catch(()=>false),easyApply:await page.getByRole('button',{name:/Easy Apply/i}).first().isVisible().catch(()=>false)};
       }catch(error){checkStopped(signal);throw navigationFailure(error);}
     },
-    async apply(job,{profile,answers,resumePath,dryRun=false,signal,beforeSubmit,onProgress,retryCounters:initialCounters}){
+    async apply(job,{profile,answers,answerBank,resumePath,dryRun=false,signal,beforeSubmit,onProgress,retryCounters:initialCounters}){
       let page,protectedAttempt=false,pageIndex=0,phase='form',lastStructure={};
       const applicationState={},retryCounters=structuredClone(initialCounters||{inspectionNavigation:0,applicationNavigation:0,fields:{},pages:{}});
-      const options={profile,answers,resumePath,signal,company:job.company,applicationState,uploadTimeout:action,actionTimeout:action};
+      const options={profile,answers,answerBank,jobId:String(job.id),resumePath,signal,company:job.company,applicationState,uploadTimeout:action,actionTimeout:action};
       const progress=async nextPhase=>{phase=nextPhase;try{await onProgress?.({phase,pageIndex,retryCounters:structuredClone(retryCounters)});}catch{throw new ApplicationFailure('storage',null,{phase});}checkStopped(signal);};
       options.onAction=async ({controlFingerprint,retry})=>{if(retry){const key=`${pageIndex}:${controlFingerprint}`;if((retryCounters.fields[key]||0)>=1)throw new ApplicationFailure('entry_verification',null,{phase:'form',controlFingerprint});retryCounters.fields[key]=1;await progress('form');}};
       const complete=async result=>{

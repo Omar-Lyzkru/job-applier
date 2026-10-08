@@ -42,3 +42,8 @@ test('screening explanation metadata cannot change compatible question draft ide
  assert.equal(a.draftId,b.draftId);assert.equal(a.occurrences.length,b.occurrences.length);
  assert.notEqual(a.draftId,groups([{...input,type:'text',pattern:'[0-9]+'}])[0].draftId);
 });
+test('scoped bank groups isolate targets while retaining compatible draft identity across provenance edits',()=>{
+ const a={label:'School',type:'text',jobId:'123',bankQuestion:{targetId:'job-123-school',sourceRef:'old'}},b={...a,jobId:'456',bankQuestion:{targetId:'job-456-school',sourceRef:'other'}};
+ assert.equal(groups([a,b]).length,2);const first=groups([a])[0];assert.equal(groups([{...a,bankQuestion:{...a.bankQuestion,sourceRef:'new'},savedAnswer:{answer:'Other'}}])[0].draftId,first.draftId);
+ assert.notEqual(groups([{...a,pattern:'[A-Z]+'}])[0].draftId,first.draftId);
+});

@@ -143,15 +143,16 @@ export async function createStore(dataDir) {
       });
       return clone(record);
     },
-    async createWork(job,{parentId=null,expectedParentRevision=null,now=new Date()}={}){
+    async createWork(job,{parentId=null,expectedParentRevision=null,expectedBankRevision=null,now=new Date()}={}){
       if(!job?.id)throw new Error('Invalid job identity');let record;
       await mutate('history',history=>{
         let parent=null;
         if(parentId){
+          if(expectedBankRevision!==null&&expectedBankRevision!==state.answerBank.revision)throw Object.assign(new Error('Stale answer bank revision before retry claim'),{status:409});
           parent=history.find(r=>r.id===parentId);if(!parent)throw new Error('Retry parent not found');revision(parent,expectedParentRevision);
           if(String(parent.job.id)!==String(job.id))throw new Error('Retry job identity changed');
           if(history.filter(r=>String(r.job.id)===String(job.id)).at(-1)?.id!==parentId||history.some(r=>r.retryOf===parentId&&inflight.has(r.status)))throw new Error('Retry is no longer latest or already active');
-          const attention=projectAttention(history,state.questions,{profile:state.config.profile,answers:state.answers}).find(item=>item.recordId===parentId);
+          const attention=projectAttention(history,state.questions,{profile:state.config.profile,answers:state.answers,answerBank:state.answerBank,now}).find(item=>item.recordId===parentId);
           if(!attention?.singleRetry)throw new Error('Retry is not eligible');
         }
         const id=randomUUID(),at=now.toISOString();

@@ -36,7 +36,7 @@ const realClock={
 export function createRunner({store,adapter,clock=realClock,dataDir=null}){
  let active=null,starting=false,controller=null;
  const status={state:'idle',currentJob:null,message:'Complete your setup, then open LinkedIn to sign in.',startedAt:null,finishedAt:null,todayCount:0,attentionCount:0,interruptedCount:0,runStats:emptyRunStats()};
- const durable=async operation=>{try{return await operation();}catch(error){if(error.blocker)throw error;throw new ApplicationFailure('storage',null);}};
+ const durable=async operation=>{try{return await operation();}catch(error){if(error.blocker||error.status===409)throw error;throw new ApplicationFailure('storage',null);}};
  const transition=async (task,patch)=>{task.record=await durable(()=>store.transitionWork(task.record.id,{expectedRevision:task.record.revision,now:clock.now(),...patch}));return task.record;};
  const recount=(history,config)=>{status.todayCount=history.filter(r=>countsTowardCap(r,dayKey(clock.now(),config.timezone),config.timezone)).length;status.interruptedCount=history.filter(r=>r.status==='interrupted').length;status.attentionCount=projectAttention(history,[],{}).length;return status.todayCount;};
  const globalBlocker=result=>(result.blockers||[]).find(b=>blockerPolicy(b.code).scope==='global')||(!result.cleanup?.confirmed&&!result.safeInspection?makeBlocker('cleanup_failed',{phase:'cleanup'}):null);
@@ -83,7 +83,7 @@ export function createRunner({store,adapter,clock=realClock,dataDir=null}){
   if(!config.intelligence?.enabled&&!matchesJob(details.description,config.search)){await outcome(task,{status:'skipped',reason:'Description does not match your keyword filters',skipKind:'keyword'});return false;}
   return true;
  }
- async function applyTask(task,config,answers,signal){
+ async function applyTask(task,config,answers,answerBank,signal){
   await transition(task,{status:'filling',phase:'form'});status.currentJob=structuredClone(task.job);status.message=`Applying to ${task.job.title} at ${task.job.company}`;
   const beforeSubmit=async({validateReady}={})=>{
    stopped(signal);if(config.dryRun||task.record.attemptedAt)throw new ApplicationFailure('storage','Submission cannot be reserved twice or in a dry run');
@@ -99,7 +99,7 @@ export function createRunner({store,adapter,clock=realClock,dataDir=null}){
   };
   let result;
   while(true){
-   try{result=await adapter.apply(task.job,{profile:structuredClone(config.profile),answers:structuredClone(answers),resumePath:config.resume.path,dryRun:config.dryRun,signal,beforeSubmit,onProgress,retryCounters:structuredClone(task.record.retryCounters)});}
+   try{result=await adapter.apply(task.job,{profile:structuredClone(config.profile),answers:structuredClone(answers),answerBank:structuredClone(answerBank),resumePath:config.resume.path,dryRun:config.dryRun,signal,beforeSubmit,onProgress,retryCounters:structuredClone(task.record.retryCounters)});}
    catch(error){if(signal.aborted&&!task.record.attemptedAt)throw error;result={status:task.record.attemptedAt?'unconfirmed':'failed',reason:error.message.split('\n')[0],blockers:[error.blocker||makeBlocker('unknown',{phase:task.record.phase})],cleanup:{confirmed:false}};}
    if(signal.aborted&&!task.record.attemptedAt)throw new Error('Stopped before submission');
    const blocked=globalBlocker(result);if(!task.record.attemptedAt&&!blocked&&result.blockers?.some(b=>b.code==='network')&&await retryWait(task,'applicationNavigation',signal))continue;break;
@@ -111,7 +111,7 @@ export function createRunner({store,adapter,clock=realClock,dataDir=null}){
  async function* discovered(config,signal){
   const ids=new Set();for await(const job of adapter.findJobs(config.search,{scanLimit:config.scanLimit,signal,intelligence:config.intelligence})){stopped(signal);if(ids.has(String(job.id)))continue;if(ids.size>=config.scanLimit)break;ids.add(String(job.id));const record=await durable(()=>store.createWork(job,{now:clock.now()}));yield {job:structuredClone(job),record};}
  }
- async function run(config,answers,signal,selected=null){
+ async function run(config,answers,answerBank,signal,selected=null){
   try{
    stopped(signal);if(!await adapter.isSignedIn())throw new ApplicationFailure('login_required','Open LinkedIn and sign in, then start again.');
    if(!config.dryRun&&recount(await store.getHistory(),config)>=config.dailyCap){status.state='paused';status.message='Daily application cap reached.';return;}
@@ -121,8 +121,8 @@ export function createRunner({store,adapter,clock=realClock,dataDir=null}){
     const tasks=[];for await(const task of source){stopped(signal);tasks.push(task);status.message=`Collecting jobs for ranking: ${tasks.length}`;}
     for(let i=0;i<tasks.length;i++){stopped(signal);const task=tasks[i];task.job.discoveryIndex=i;if(atCap()){status.state='paused';status.message='Daily application cap reached.';break;}if(await inspectTask(task,config,signal))eligible.push(task);}
     const representatives=new Map();for(const task of eligible.sort((a,b)=>compareCandidates(a.job,b.job))){if(task.job.fingerprint&&representatives.has(task.job.fingerprint)){task.job.duplicateEvidence={jobId:representatives.get(task.job.fingerprint).job.id,fingerprint:task.job.fingerprint};await outcome(task,{status:'skipped',reason:'Equivalent posting already selected in this run'});}else{if(task.job.fingerprint)representatives.set(task.job.fingerprint,task);task.eligible=true;}}
-    if(status.state==='running')for(const task of eligible.filter(t=>t.eligible)){stopped(signal);if(atCap()){status.state='paused';status.message='Daily application cap reached.';break;}if(!await applyTask(task,config,answers,signal))break;}
-   }else for await(const task of source){stopped(signal);if(atCap()){status.state='paused';status.message='Daily application cap reached.';break;}if(await inspectTask(task,config,signal)&&!await applyTask(task,config,answers,signal))break;}
+    if(status.state==='running')for(const task of eligible.filter(t=>t.eligible)){stopped(signal);if(atCap()){status.state='paused';status.message='Daily application cap reached.';break;}if(!await applyTask(task,config,answers,answerBank,signal))break;}
+   }else for await(const task of source){stopped(signal);if(atCap()){status.state='paused';status.message='Daily application cap reached.';break;}if(await inspectTask(task,config,signal)&&!await applyTask(task,config,answers,answerBank,signal))break;}
    if(status.state==='running'){status.state='idle';status.message=finishMessage(status.runStats);}
   }catch(error){if(!signal.aborted)pauseFor(error.blocker||makeBlocker('unknown'),error.message.split('\n')[0]);}
   finally{
@@ -137,11 +137,11 @@ export function createRunner({store,adapter,clock=realClock,dataDir=null}){
   try{
    if(dryRun!==undefined&&typeof dryRun!=='boolean')throw new Error('Dry run must be true or false');
    if(recordIds!==undefined&&(!Array.isArray(recordIds)||recordIds.length<1||recordIds.length>100||recordIds.some(id=>typeof id!=='string'||!id)||new Set(recordIds).size!==recordIds.length))throw new Error('Retry needs 1–100 unique record IDs');
-   await durable(()=>store.recoverWork());const config=await store.getConfig(),answers=await store.getAnswers();if(dryRun!==undefined)config.dryRun=dryRun;
+   await durable(()=>store.recoverWork());const {config,answers,answerBank}=await store.getRunInputs();if(dryRun!==undefined)config.dryRun=dryRun;
    const missing=readiness(config);if(missing.length)throw new Error(`Complete setup: ${missing.join('; ')}`);const resume=await stat(config.resume.path).catch(()=>null);if(!resume?.isFile()||!resume.size||resume.size>MAX_RESUME_BYTES)throw new Error('The selected résumé is missing, empty, or over 2 MB. Upload it again.');stopped(controller.signal);
    let selected=null;
-   if(recordIds){const history=await store.getHistory(),attention=projectAttention(history,await store.getQuestions(),{profile:config.profile,answers});const parents=recordIds.map(id=>{const item=attention.find(a=>a.recordId===id);if(!item?.singleRetry||recordIds.length>1&&!item.readyForBatch)throw new Error('Selected application is not eligible or ready for retry');return history.find(r=>r.id===id);});selected=[];for(const parent of parents){const record=await durable(()=>store.createWork(parent.job,{parentId:parent.id,expectedParentRevision:parent.revision||0,now:clock.now()}));selected.push({job:structuredClone(parent.job),record});}}
-   recount(await store.getHistory(),config);status.runStats=emptyRunStats();status.state='running';status.currentJob=null;status.startedAt=clock.now().toISOString();status.finishedAt=null;status.message=config.dryRun?'Starting dry run':recordIds?'Retrying selected applications':'Starting automatic applications';const signal=controller.signal;active=run(config,answers,signal,selected).finally(()=>{active=null;});return structuredClone(status);
+   if(recordIds){const history=await store.getHistory(),attention=projectAttention(history,await store.getQuestions(),{profile:config.profile,answers,answerBank,now:clock.now()});const parents=recordIds.map(id=>{const item=attention.find(a=>a.recordId===id);if(!item?.singleRetry||recordIds.length>1&&!item.readyForBatch)throw new Error('Selected application is not eligible or ready for retry');return history.find(r=>r.id===id);});selected=[];for(const parent of parents){const record=await durable(()=>store.createWork(parent.job,{parentId:parent.id,expectedParentRevision:parent.revision||0,expectedBankRevision:answerBank.revision,now:clock.now()}));selected.push({job:structuredClone(parent.job),record});}}
+   recount(await store.getHistory(),config);status.runStats=emptyRunStats();status.state='running';status.currentJob=null;status.startedAt=clock.now().toISOString();status.finishedAt=null;status.message=config.dryRun?'Starting dry run':recordIds?'Retrying selected applications':'Starting automatic applications';const signal=controller.signal;active=run(config,answers,answerBank,signal,selected).finally(()=>{active=null;});return structuredClone(status);
   }catch(error){await store.recoverWork().catch(()=>{});throw error;}finally{starting=false;}
  }
  return {getStatus:()=>structuredClone(status),start:options=>launch(options),retry(options={}){if(!Object.hasOwn(options,'recordIds'))return Promise.reject(new Error('Retry needs record IDs'));return launch(options);},

@@ -90,7 +90,7 @@ export function describeScreening(field){
 export function explainScreeningResolution(field,resolution){
  const d=describeScreening(field),sourceQuestion=resolution.sourceQuestion??null;
  let decision='confirmation_required',reasonCode='explicit_answer_needed',summary='Save an explicit answer to this question before retrying.';
- if(d.matchPolicy==='manual_only'||field.type==='unsupported'||resolution.manual||(field.type==='checkbox'&&field.required&&resolution.kind==='fill'&&resolution.value===false)){
+ if((d.matchPolicy==='manual_only'&&!resolution.entryId)||field.type==='unsupported'||resolution.manual||(field.type==='checkbox'&&field.required&&resolution.kind==='fill'&&resolution.value===false)){
   decision='manual_only';reasonCode=d.reasonCode==='ambiguous_legacy_identity'||d.reasonCode==='employer_unknown'?d.reasonCode:'unsupported_control';
   summary=reasonCode==='ambiguous_legacy_identity'?'Old C-family answer keys can overlap. Confirm this experience directly in LinkedIn.':reasonCode==='employer_unknown'?'The employer is unknown. Complete this consent question directly in LinkedIn.':'Complete this control directly in LinkedIn; a saved answer does not make automatic entry safe.';
  }else if(resolution.kind==='fill'){

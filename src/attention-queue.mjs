@@ -27,7 +27,7 @@ export function projectQuestions(history,rawQuestions){
   }
   return result;
 }
-export function projectAttention(history,rawQuestions,{profile={},answers={}}={}){
+export function projectAttention(history,rawQuestions,{profile={},answers={},answerBank,now}={}){
   const questions=projectQuestions(history,rawQuestions),latest=latestJobs(history),groups=new Map();
   for(const q of questions){const id=String(q.jobId??'');const list=groups.get(id)||[];list.push(q);groups.set(id,list);}
   const uncertainRecords=new Map();
@@ -43,7 +43,7 @@ export function projectAttention(history,rawQuestions,{profile={},answers={}}={}
     const job=record?.job||{id,title:'Job details unavailable',company:''};
     const duplicate=record&&blockingDuplicate(job,history);
     const processing=history.some(r=>idOf(r)===id&&r.lifecycleVersion===1&&active.has(r.status));
-    const resolutions=pending.map(q=>resolveAnswer({...q,company:q.company||job.company||''},profile,answers));
+    const resolutions=pending.map(q=>resolveAnswer({...q,company:q.company||job.company||'',jobId:id},profile,answers,{answerBank,now}));
     const manual=pending.some((q,i)=>q.type==='unsupported'||resolutions[i].manual||(q.type==='checkbox'&&q.required&&resolutions[i].kind==='fill'&&resolutions[i].value===false));
     const missing=pending.some((q,i)=>isMissingQuestion(q)&&resolutions[i].kind!=='fill');
     const operational=pending.some(q=>!isMissingQuestion(q));

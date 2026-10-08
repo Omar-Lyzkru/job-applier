@@ -439,3 +439,24 @@ test('screening meaning retains professional years zero through entry and final 
  assert.equal(await dialog.locator('input[name=years]').inputValue(),'0');assert.deepEqual(result.questions,[]);assert.deepEqual(result.errors,[]);
  const final=await verifyApplicationFields(dialog,{...options,answers});assert.deepEqual(final.questions,[]);assert.deepEqual(final.errors,[]);
 });
+
+import {scopedEntry,scopedBank} from './fixtures/scoped-bank.mjs';
+test('scoped bank fills displayed No and professional zero with identical final verification',async t=>{
+ const {page,dialog,options}=await setup(t);await page.setContent('<div role="dialog"><fieldset><legend>Are you authorized to work in US?*</legend><label><input type="radio" name="legal" value="same" required>Yes</label><label><input type="radio" name="legal" value="same" required>No</label></fieldset><label>Years of professional Python experience<input type="number" min="0" step="1" required></label></div>');
+ const fields=(await discoverFields(dialog)).map(e=>({...e.field,jobId:'123',company:'Example'}));options.jobId='123';options.company='Example';options.answerBank=scopedBank(scopedEntry(fields[0],false),scopedEntry(fields[1],0));
+ const result=await fillApplicationFields(dialog,options);assert.equal(result.questions.length,0);assert.equal(await dialog.locator('input[type=radio]').nth(1).isChecked(),true);assert.equal(await dialog.locator('input[type=number]').inputValue(),'0');assert.equal((await verifyApplicationFields(dialog,options)).ok,true);
+});
+test('scoped bank C++ does not fill C# unsupported controls or required checkbox false',async t=>{
+ const {page,dialog,options}=await setup(t);await page.setContent('<div role="dialog"><label>Years of C++ experience<input type="number" required min="0"></label><label>Years of C# experience<input type="number" required min="0"></label><label>Would you relocate?<input type="checkbox" required></label><div role="combobox" aria-label="School" aria-required="true"></div></div>');
+ const fields=(await discoverFields(dialog)).map(e=>({...e.field,jobId:'123',company:'Example'}));options.jobId='123';options.company='Example';options.answerBank=scopedBank(scopedEntry(fields[0],0),scopedEntry(fields[2],false));
+ const result=await fillApplicationFields(dialog,options);assert.equal(await dialog.locator('input[type=number]').nth(0).inputValue(),'0');assert.equal(await dialog.locator('input[type=number]').nth(1).inputValue(),'');assert.equal(result.questions.length,3);assert.equal((await verifyApplicationFields(dialog,options)).ok,false);
+});
+test('scoped bank SMS contexts choices and dates changing require confirmation and preserve bounded source',async t=>{
+ const {page,dialog,options}=await setup(t);const markup=terms=>`<div role="dialog"><fieldset><legend>Do you consent to receiving text message updates about your application?*</legend><p>${terms}</p><label><input type="radio" name="sms" value="x" required>Yes</label><label><input type="radio" name="sms" value="x" required>No</label></fieldset><label>Expected graduation<input type="text" placeholder="MM/YYYY" maxlength="7" pattern="[0-9]{2}/[0-9]{4}" required></label></div>`;
+ await page.setContent(markup('Application updates. Terms v1. Reply STOP.'));const fields=(await discoverFields(dialog)).map(e=>({...e.field,jobId:'123',company:'Employer A'}));options.jobId='123';options.company='Employer A';options.answerBank=scopedBank(scopedEntry(fields[0],false,{kind:'employer',employerIdentity:'employer a'}),scopedEntry(fields[1],'05/2028'));
+ assert.equal((await fillApplicationFields(dialog,options)).questions.length,0);
+ options.company='Employer B';await page.setContent(markup('Application updates. Terms v1. Reply STOP.'));assert.ok((await fillApplicationFields(dialog,options)).questions.some(q=>q.label.includes('consent')));
+ options.company='Employer A';await page.setContent(markup('Marketing. Terms v2.'));let result=await fillApplicationFields(dialog,options);assert.ok(result.questions.some(q=>q.label.includes('consent')));assert.match(result.questions.find(q=>q.label.includes('consent')).consentText,/Terms v2/);
+ await page.setContent(markup('Application updates. Terms v1. Reply STOP.'));await dialog.locator('input[type=text]').evaluate(el=>{el.placeholder='YYYY-MM';el.pattern='[0-9]{4}-[0-9]{2}';});result=await fillApplicationFields(dialog,options);const date=result.questions.find(q=>q.label==='Expected graduation');assert.equal(date.maxLength,7);assert.equal(date.pattern,'[0-9]{4}-[0-9]{2}');
+ await dialog.locator('fieldset label').nth(1).evaluate(el=>{el.lastChild.textContent='Never';});assert.equal((await verifyApplicationFields(dialog,options)).ok,false);
+});

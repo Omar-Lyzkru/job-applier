@@ -1,3 +1,4 @@
+import {bankCandidates,describeBankQuestion} from './answer-bank.mjs';
 export function normalizeQuestion(text) {
   return String(text).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 }
@@ -125,7 +126,7 @@ const isYearsIntent=intent=>intent?.startsWith('skill-years:')||intent?.startsWi
 function validYearsAnswer(field,intent,value){return !isYearsIntent(intent)||['select','radio'].includes(field.type)||scalarYears(value);}
 
 // Equivalence is deliberately limited to known wording. Token similarity can only suggest.
-export function findSavedAnswer(field,answers) {
+function findLegacySavedAnswer(field,answers) {
   const description=describeQuestion(field),key=normalizeQuestion(field.label),intent=description.intent;
   if(description.risk==='ambiguous_identity')return {kind:'missing',manual:true,reason:'C, C++ and C# saved keys may overlap. Confirm this experience directly in LinkedIn.'};
   const entries=Object.entries(answers).filter(([,value])=>nonempty(value));
@@ -160,3 +161,25 @@ export function findSavedAnswer(field,answers) {
   return {kind:'missing',reason:suggestions.length?'Similar saved answers need review':'No explicit saved answer',...(suggestions.length?{suggestions}:{})};
 }
 import {describeScreening} from './screening-intelligence.mjs';
+
+export function findSavedAnswer(field,answers,{answerBank,now}={}){
+ if(!answerBank)return findLegacySavedAnswer(field,answers);
+ if(field.type==='unsupported'||field.readOnly)return {kind:'missing',manual:true,reason:'Complete this unsupported or read-only control directly in LinkedIn.'};
+ const candidates=bankCandidates(field,answerBank,{now}),intent=describeBankQuestion(field).descriptor.intent;
+ const choose=(entries,legacy)=>{
+  const values=entries.map(e=>e.value);if(legacy?.answer!==undefined)values.push(legacy.answer);
+  if(new Set(values.map(v=>answerMeaning(v,intent))).size!==1)return {kind:'missing',manual:true,reason:'Conflicting scoped answers need review'};
+  const e=entries[0];return {answer:e.value,sourceQuestion:e.sourceQuestion,match:candidates.exact.includes(e)?'exact':'equivalent',entryId:e.id,entryRevision:e.revision,bankRevision:answerBank.revision,answerScope:structuredClone(e.scope)};
+ };
+ if(candidates.exact.length)return choose(candidates.exact);
+ const blockedExact=candidates.owned.some(e=>e.question.exactIdentity===describeBankQuestion(field).exactIdentity);
+ if(blockedExact)return {kind:'missing',manual:true,reason:'This scoped answer was retired, expired or its control/context changed. Confirm it again.'};
+ const legacy=findLegacySavedAnswer(field,answers);
+ if(legacy.match==='exact')return legacy;
+ if(candidates.equivalent.length){
+  if(legacy.suggestions?.length&&legacy.reason==='Conflicting saved answers need review')return {kind:'missing',manual:true,reason:legacy.reason,suggestions:legacy.suggestions};
+  return choose(candidates.equivalent,legacy.match==='equivalent'?legacy:null);
+ }
+ if(candidates.owned.length)return {kind:'missing',manual:true,reason:'This scoped meaning needs fresh confirmation; previous answers will not be restored automatically.'};
+ return legacy;
+}

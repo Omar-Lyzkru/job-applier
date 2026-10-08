@@ -134,17 +134,18 @@ export function validateAnswers(input) {
 }
 const yes = new Set(['yes','true','1','agree','i agree']);
 const no = new Set(['no','false','0','disagree']);
-export function resolveAnswer(field,profile,answers) {
+export function resolveAnswer(field,profile,answers,options={}) {
   const key = normalizeQuestion(field.label);
-  let memory=findSavedAnswer(field,answers), source='saved answer';
+  let memory=findSavedAnswer(field,answers,options), source='saved answer';
   if(memory.kind==='missing'){
+    if(memory.manual)return memory;
     if (aliases[key] && profile[aliases[key]]) memory={answer:profile[aliases[key]],sourceQuestion:key,match:'profile'};
     else if(key==='full name' && profile.firstName && profile.lastName) memory={answer:`${profile.firstName} ${profile.lastName}`,sourceQuestion:key,match:'profile'};
     else return memory;
     source='profile';
   }
   const {answer:value,sourceQuestion,match,suggestions}=memory;
-  const provenance={answer:value,sourceQuestion,match,source};
+  const provenance={answer:value,sourceQuestion,match,source,...(memory.entryId?{entryId:memory.entryId,entryRevision:memory.entryRevision,bankRevision:memory.bankRevision,answerScope:memory.answerScope}:{})};
   const missing=reason=>({kind:'missing',reason,...(suggestions?.length?{suggestions}:match==='exact'?{suggestions:[{question:sourceQuestion,answer:value,reason}]}:{})});
   if (value===undefined || value===null || String(value).trim()==='') return missing('Saved answer is empty');
   if (field.type==='checkbox') {

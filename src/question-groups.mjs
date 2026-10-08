@@ -12,10 +12,10 @@ const hash=value=>createHash('sha256').update(signature(value)).digest('hex').sl
 function compatibility(question){
   const description=question.description||describeQuestion(question);
   const formatHints=String(question.label).match(/\b(?:mm|month|yyyy|year|dd|day)(?:\s*[/.-]\s*|\s+)(?:mm|month|yyyy|year|dd|day)(?:(?:\s*[/.-]\s*|\s+)(?:mm|month|yyyy|year|dd|day))?\b/gi)||[];
-  return {answerKey:question.answerKey||description.answerKey,type:question.type||'text',required:Boolean(question.required),readOnly:Boolean(question.readOnly),
+  return {bankTarget:question.bankQuestion?.targetId??null,answerKey:question.answerKey||description.answerKey,type:question.type||'text',required:Boolean(question.required),readOnly:Boolean(question.readOnly),
     choices:(question.options||[]).map(option=>text(option.label)).sort(),scope:description.scope,
     pattern:question.pattern??null,placeholder:text(question.placeholder),formatHints:formatHints.map(text),
-    min:question.min??null,max:question.max??null,step:question.step??null};
+    min:question.min??null,max:question.max??null,step:question.step??null,maxLength:question.maxLength??null,consentText:question.consentText??null};
 }
 
 // Display groups may split on saved provenance. Draft identity only describes
