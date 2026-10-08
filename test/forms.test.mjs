@@ -460,3 +460,8 @@ test('scoped bank SMS contexts choices and dates changing require confirmation a
  await page.setContent(markup('Application updates. Terms v1. Reply STOP.'));await dialog.locator('input[type=text]').evaluate(el=>{el.placeholder='YYYY-MM';el.pattern='[0-9]{4}-[0-9]{2}';});result=await fillApplicationFields(dialog,options);const date=result.questions.find(q=>q.label==='Expected graduation');assert.equal(date.maxLength,7);assert.equal(date.pattern,'[0-9]{4}-[0-9]{2}');
  await dialog.locator('fieldset label').nth(1).evaluate(el=>{el.lastChild.textContent='Never';});assert.equal((await verifyApplicationFields(dialog,options)).ok,false);
 });
+test('scoped bank preserves a supported C++ observation for later explicit confirmation',async t=>{
+ const {page,dialog,options}=await setup(t);await page.setContent('<div role="dialog"><label>Years of C++ experience<input type="number" required min="0"></label></div>');options.jobId='123';options.company='Example';options.answers={'years of c experience':8};options.answerBank={version:1,revision:0,entries:[]};
+ const first=await fillApplicationFields(dialog,options);assert.equal(first.questions[0].type,'number');assert.equal(first.questions[0].blocker,'missing_answer');assert.equal(first.questions[0].min,'0');assert.equal(await dialog.locator('input').inputValue(),'');
+ options.answerBank=scopedBank(scopedEntry(first.questions[0],0));assert.equal((await fillApplicationFields(dialog,options)).questions.length,0);assert.equal((await verifyApplicationFields(dialog,options)).ok,true);
+});

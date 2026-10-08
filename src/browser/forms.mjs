@@ -1,3 +1,4 @@
+import {allowedBankScopes} from '../answer-bank.mjs';
 import {basename,extname} from 'node:path';
 import {readFile} from 'node:fs/promises';
 import {randomUUID,createHash} from 'node:crypto';
@@ -242,8 +243,9 @@ export async function verifyApplicationFields(dialog,options={}){
  const add=(field,reason,code,suggestions=[])=>{questions.push(questionFor({...field,jobId:options.jobId},company,reason,code==='missing_answer'?'missing_answer':'operational',suggestions));blockers.push(makeBlocker(code,{phase:'form',controlFingerprint:fieldIdentity(field)}));};
  for(const entry of fields){
   checkStopped(options.signal);const f=entry.field;
-  if(f.documentSelection){const matches=entry.radios?.filter(o=>state.resumeVerified&&o.label.includes(state.resumeName))||[];if(matches.length!==1||!await matches[0].locator.isChecked())add(f,'Could not verify the selected résumé','resume_upload');continue;}
-  if(f.type==='file'){if(/resume|résumé|\bcv\b/i.test(f.label)){const current=state.resumeVerified&&await entry.locator.evaluate((el,name)=>{
+  if(f.documentSelection){const matches=entry.radios?.filter(o=>state.resumeVerified&&o.label.includes(state.resumeName))||[];if(matches.length!==1||!await matches[0].locator.evaluateAll(inputs=>inputs.length===1&&inputs[0].checked))add(f,'Could not verify the selected résumé','resume_upload');continue;}
+  if(f.type==='file'){if(/resume|résumé|\bcv\b/i.test(f.label)){const current=state.resumeVerified&&await entry.locator.evaluateAll((elements,name)=>{
+      if(elements.length!==1)return false;const el=elements[0];
       const area=el.closest('[data-applier-resume-region],.jobs-document-upload,.jobs-resume-upload,section,fieldset')||el.parentElement;
       const matches=Array.from(area?.querySelectorAll('input[type=radio]')||[]).filter(radio=>[radio.getAttribute('aria-label')||'',...(radio.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean).map(id=>document.getElementById(id)?.textContent||''),...Array.from(radio.labels||[]).map(label=>label.textContent)].some(label=>label.includes(name)));
       return matches.length===1&&matches[0].checked;
@@ -251,8 +253,9 @@ export async function verifyApplicationFields(dialog,options={}){
   if(identities.get(fieldIdentity(f))!==1){add(f,'More than one compatible field was found','form_changed');continue;}
   if(f.type==='unsupported'){if(f.required||hasValue(f))add(f,'This control is not supported automatically','unsupported_control');continue;}
   const answer=resolveAnswer({...f,company,jobId:options.jobId},options.profile||{},options.answers||{},{answerBank:options.answerBank}),target=desired(entry,options);
-  if(answer.kind==='missing'&&f.required){add(answer.manual?{...f,type:'unsupported'}:f,answer.reason,answer.manual?'unsupported_control':'missing_answer',answer.suggestions);continue;}
-  if(answer.manual&&(f.required||hasValue(f))){add({...f,type:'unsupported'},answer.reason,'unsupported_control',answer.suggestions);continue;}
+  const confirmable=answer.manual&&options.answerBank&&allowedBankScopes({...f,company,jobId:options.jobId}).length>0;
+  if(answer.kind==='missing'&&f.required){add(answer.manual&&!confirmable?{...f,type:'unsupported'}:f,answer.reason,answer.manual&&!confirmable?'unsupported_control':'missing_answer',answer.suggestions);continue;}
+  if(answer.manual&&(f.required||hasValue(f))){add(confirmable?f:{...f,type:'unsupported'},answer.reason,confirmable?'missing_answer':'unsupported_control',answer.suggestions);continue;}
   if(!target){if(hasValue(f))add(f,'Unknown prefilled answer cannot be cleared safely','entry_verification');continue;}
   if(!retained(entry,target))add(f,'The field did not retain the saved answer','entry_verification');
   else if(f.type==='checkbox'&&f.required&&!target.value)add(f,'The required checkbox needs an explicit yes answer','unsupported_control');

@@ -680,3 +680,43 @@ screenshots were privately copied and checksum-verified before workspace cleanup
 
 The user requested Phase 3B continuation after these fixes. Its detailed plan is
 written for review; no 3B implementation, bank creation or migration has begun.
+
+
+## Phase 3B — scoped confirmations (2026-10-07)
+
+Approved plan: `docs/superpowers/plans/2026-10-06-phase-3b-scoped-answers.md`.
+Native execution started from `31bb667` in an isolated managed checkout.
+Tasks 1–4 are verified and committed; whole-phase verification/review/delivery
+remain in progress until the checklist below is closed.
+
+- Baseline: 209/209 unit/API tests. Tasks 1, 2, 3 and 4 finished at 217,
+  222, 229 and 237 passing tests respectively. Dashboard: 47/47 passing.
+- New pure bank identities preserve punctuation, raw typed values, bounded
+  descriptors/constraints, explicit scopes, retired ownership and expiry.
+- Atomic private persistence has revision races, reopen/corrupt-state tests,
+  genuine pre-rename/post-rename failures and unchanged legacy bytes coverage.
+- Shared resolver/readiness/form verification and run/retry snapshots are
+  covered. Caller mutation and mid-run edits do not change an active snapshot.
+- Preview/save/retire APIs derive observations on the server; stale source and
+  old-value checks run again inside the serialized bank write. Token/Origin
+  protections, invalid scope/control values and zero application dispatch tested.
+- Scoped UI covers typed false/zero, visible replacement confirmation, update
+  rather than duplicate entry creation, stale draft isolation, retirement,
+  hostile plain text and light/dark 390px layouts. Shared editors remain usable.
+- Whole-phase inspection repaired the missing native C-family observation
+  path with RED→GREEN synthetic source/fill/final verification coverage.
+- First whole browser run: 138/163 passed, 25 adapter transition failures.
+  Investigation traced stale file/radio document locators across asynchronous
+  page replacement. Nonwaiting cardinality-checked document observations retain
+  blocking behavior, while existing success/reset/fresh-field/fresh-résumé
+  guards pass 4/4. Fresh complete verification is required after this fix.
+
+No real applicant data was linked into the checkout, no legacy import occurred,
+and no signed-in browser/application run/live submission was used for testing.
+Missing consent context/salary units and unsupported controls remain manual.
+Historical lost control identity cannot be reconstructed. Separate occurrence
+editors retain scoped targets without changing shared-editor grouping. New
+C-family confirmation does not reinterpret collapsed legacy keys.
+
+Deferred: 3C optional legacy review/import, 3D unified reviews, 3E fit recheck,
+Phases 4–6. The earlier 3A SMS caution-display minor remains deferred.

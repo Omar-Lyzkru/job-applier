@@ -189,7 +189,7 @@ aliases. These explanations do not change saved answers or launch applications.
 
 Current study and completed education, work authorization and sponsorship, and
 each employer's consent remain separate. Old C/C++/C# experience keys can
-collide, so those questions require manual confirmation in LinkedIn.
+collide and remain unavailable for automatic reuse. New punctuation-preserving scoped confirmations can answer each supported C, C++ or C# question independently; the old keys are never reinterpreted.
 
 Conflicting answers, uncertain wording, unavailable choices, and incompatible
 graduation date formats need review. Generic similar wording only suggests
@@ -231,3 +231,36 @@ Live job submission requires your account sign-in and profile setup. LinkedIn's 
 - **Port occupied:** use `JOB_APPLIER_PORT=3211 ./start.sh` and the URL printed in the terminal.
 
 See the [design](docs/superpowers/specs/2026-10-01-linkedin-easy-apply-design.md) and [implementation plan](docs/superpowers/plans/2026-10-01-linkedin-easy-apply.md) for the approved scope.
+
+
+### Scoped confirmations (Phase 3B)
+
+In **Answers**, expand **Save with a scope for job …** on an observed question.
+Enter your own answer, choose **This job only** (the default), and select a
+broader employer or reusable meaning only when offered. **Preview scoped answer**
+shows the exact wording, employer, job, value and scope without saving. Confirm
+and save separately. Replacing a previous exact shared answer requires an explicit
+checkbox; the shared answer itself remains unchanged.
+
+The **Scoped answer library** shows each confirmation's source and scope. Edit
+there to change a value or scope, or choose **Retire scoped answer** to stop reuse.
+Retirement retains ownership so the old shared value cannot return in that scope.
+An optional expiry also requires renewed confirmation. Same observed scope saves
+update its existing entry; overlapping conflicting scopes need review, with no
+preference for the newest or narrowest confirmation.
+
+Broader reuse is limited to reviewed meanings. Consent needs a known employer,
+application purpose and observed wording/terms. Unknown consent context, missing
+salary units, unsupported controls, changed choices/formats and conflicts remain
+manual or require a new confirmation. Historical questions that lost their native
+control context cannot be reconstructed. C/C++/C# confirmations preserve each
+technology and total versus professional experience independently.
+
+Scoped confirmations live only in private `data/answer-bank.json`. Missing bank
+means the existing shared answers still work. No legacy import or migration runs.
+Each application run freezes settings, shared answers and the bank together;
+edits affect a later run. Saves and polling never retry or submit applications.
+After saving, use the separate existing retry action when eligible. Operational,
+uncertain, attempted, duplicate-protected and unsupported work retain their guards.
+Unsaved scoped edits stay in the current page session after a rejected save;
+changed targets retain the old draft separately rather than transferring it.

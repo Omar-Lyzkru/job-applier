@@ -44,3 +44,4 @@ h2{font-size:16px;font-weight:650;letter-spacing:-.3px;margin:0 0 7px}h3{font-si
 .scoped-preview[hidden] {display:none;}
 .scoped-preview input[type=checkbox] {width:auto;}
 .scoped-library-entry > button {margin:8px 8px 8px 0;}
+.scoped-content p,.scoped-preview p,.scoped-library-entry p,.scoped-retained-draft p {color:var(--palette-405371);}
