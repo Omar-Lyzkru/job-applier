@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-06-phase-3-application-intelligence-design.md`, sections 5–12, limited to 3B. Phase 3A and the separately approved theme/save-display fixes are delivered at `693d612`.
 
-**Status:** The user requested continuation into 3B after the fixes. The user approved this plan with “continue here” on 2026-10-07. Native execution is underway. Stop after verified 3B; 3C requires separate approval.
+**Status:** The user requested continuation into 3B after the fixes. The user approved this plan with “continue here” on 2026-10-07. Native execution completed and verified on 2026-10-07. Phase 3B is delivered; STOP here. Phase 3C requires separate approval.
 
 ## Global Constraints
 
@@ -127,8 +127,8 @@ New same-origin token-guarded commands (JSON, bounded input):
 - [x] Run `npm test` and `npm run test:browser`, saving complete logs/actual counts; require zero failures. Inspect dark/light desktop and 390px synthetic scoped-editor screenshots, check changed JavaScript syntax and `git diff --check`. No paid/live service or dependency installation.
 - [x] Request one fresh whole-change review under Native execution. Focus on ownership/fallback, scope ambiguity, source validation, frozen bank consistency, drafts and untouched protected submission invariants. Reproduce/fix Important/Critical findings with RED→GREEN tests and green suites; record Minor findings for later.
 - [x] Record actual files/results, known manual/unsupported limits, reviewer rulings and deferred 3C–3E. Explain that new scoped entries do not import legacy values or start applications.
-- [ ] Complete previously authorized integration/GitHub delivery only after clean verification. Back up private data (including bank if present), confirm idle/no in-flight work, preserve legacy bytes and history identity/order/attempt times across startup, and verify local/remote revision. Keep proof private; preserve it before native workspace cleanup/archive.
-- [ ] Report verified 3B completion and STOP. No 3C implementation without separate approval.
+- [x] Complete previously authorized integration/GitHub delivery only after clean verification. Back up private data (including bank if present), confirm idle/no in-flight work, preserve legacy bytes and history identity/order/attempt times across startup, and verify local/remote revision. Keep proof private; preserve it before native workspace cleanup/archive.
+- [x] Report verified 3B completion and STOP. No 3C implementation without separate approval.
 
 ## Plan self-review and approval boundary
 
@@ -143,3 +143,19 @@ unified review and fit recheck have no task here and remain deferred.
 
 This planning step changed no product code, bank file or applicant values.
 Review this plan before execution; preserve Native execution after approval.
+
+
+## Phase 3B completion boundary — 2026-10-07
+
+Tasks 1–5 complete. Post-review suites: 242/242 unit/API and 164/164 browser.
+One independent review, two Important findings fixed with failing-then-passing
+regressions, no newly deferred minors or declined-to-judge items. Product release
+`6a2d9f1` fast-forwarded into primary main and verified on GitHub; merged-result
+unit/API suite also passed 242/242. Startup verification preserved private bytes
+and all 364 history identities/order/attempt times, with zero application attempts.
+Bank remains absent until the user confirms a scoped answer. Proof/backup stays
+private. No live application was used for testing. The final documentation commit
+is delivered separately without changing the running product.
+
+Stop at 3B. Optional legacy import (3C), unified reviews (3D), fit recheck (3E)
+and Phases 4–6 remain deferred pending their own approval.

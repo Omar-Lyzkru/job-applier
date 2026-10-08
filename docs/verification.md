@@ -686,8 +686,8 @@ written for review; no 3B implementation, bank creation or migration has begun.
 
 Approved plan: `docs/superpowers/plans/2026-10-06-phase-3b-scoped-answers.md`.
 Native execution started from `31bb667` in an isolated managed checkout.
-Tasks 1–4 are verified and committed; whole-phase verification/review/delivery
-remain in progress until the checklist below is closed.
+Tasks 1–5 are verified and delivered. The 3B checklist is closed; execution
+stops before Phase 3C.
 
 - Baseline: 209/209 unit/API tests. Tasks 1, 2, 3 and 4 finished at 217,
   222, 229 and 237 passing tests respectively. Dashboard: 47/47 passing.
@@ -767,3 +767,22 @@ Rulings made during implementation, with their costs if wrong:
    keep their grouping. Cost: extra per-job cards, with no cross-job draft writes.
 No additional final-review rulings or newly deferred minors. The earlier 3A
 SMS caution-display minor remains deferred (low-impact caution wording).
+
+
+Phase 3B delivery completed: product release `6a2d9f1` fast-forwarded to primary
+main; GitHub main matched its full revision. A fresh merged-result unit/API run
+passed **242/242**. The app started at `http://127.0.0.1:3210/` in idle state,
+with no run start and **zero startup application attempts**. A verified private
+backup preceded delivery. Config, legacy answers, questions and all **364 history
+records** remained byte-for-byte identical; history IDs/order/attempt timestamps
+also matched independently. The bank remains absent, and bootstrap supplies the
+empty revision-zero bank without writing a file or migrating values. Read-only
+bootstrap showed zero unanswered groups, four saved groups awaiting retry and
+no manual groups. Counts reflect current data, not the earlier 357-record/five-
+group snapshot. No applicant answer or application was changed by verification.
+
+Private review/test logs, failed runs, ledger and synthetic screenshots are copied
+with checksum verification before native scratch cleanup and worktree archival.
+Only this plan's scratch/checkout is cleaned up. Phase 3B is complete; STOP before
+3C until separately approved. Live LinkedIn layouts are not verified by these
+local synthetic browser tests. Existing manual context/control limits remain.
