@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-06-phase-3-application-intelligence-design.md`, sections 5–12, limited to 3B. Phase 3A and the separately approved theme/save-display fixes are delivered at `693d612`.
 
-**Status:** The user requested continuation into 3B after the fixes. This detailed plan is ready for user review; execution has not begun. Retain Native execution after approval. Stop after verified 3B; 3C requires separate approval.
+**Status:** The user requested continuation into 3B after the fixes. The user approved this plan with “continue here” on 2026-10-07. Native execution is underway. Stop after verified 3B; 3C requires separate approval.
 
 ## Global Constraints
 
@@ -35,10 +35,10 @@
 
 ## Preflight (after plan approval)
 
-- [ ] Inspect Git status/diff/recent commits, this plan, its spec and verification notes. Trust completed ledger tasks; preserve valid partial work.
-- [ ] Use the native managed-worktree tool with the existing consent/preference, inspecting attachments first. Do not restore an archived earlier phase just to start 3B.
-- [ ] Reuse installed dependencies and synthetic browser binaries only; do not link applicant data or signed-in profiles. Apply TDD and verification-before-completion.
-- [ ] Create this plan's Native ledger/workspace; record shared-interface rulings before Task 1. Run `npm test`, record actual count/output and require zero failures.
+- [x] Inspect Git status/diff/recent commits, this plan, its spec and verification notes. Trust completed ledger tasks; preserve valid partial work.
+- [x] Use the native managed-worktree tool with the existing consent/preference, inspecting attachments first. Do not restore an archived earlier phase just to start 3B.
+- [x] Reuse installed dependencies and synthetic browser binaries only; do not link applicant data or signed-in profiles. Apply TDD and verification-before-completion.
+- [x] Create this plan's Native ledger/workspace; record shared-interface rulings before Task 1. Run `npm test`, record actual count/output and require zero failures.
 
 ## Shared contracts
 
@@ -72,11 +72,11 @@ Resolution order: existing control/context guards → compatible confirmed scope
 
 **Interfaces:** Produce the pure contracts above and validated `AnswerBank`/`Entry` shapes for Task 2 storage and Task 3 selection.
 
-- [ ] Write failing `bank identities preserve punctuation and qualifiers`, `bank candidates require explicit scope and compatible controls`, `retired owners remain visible without supplying values`, and `overlapping scope conflicts are not ranked by recency` tests. Assert `exactQuestionIdentity({label:'Years of C++ experience*'}) !== exactQuestionIdentity({label:'Years of C# experience*'})`; boolean false and numeric zero survive validation unchanged. Unknown scope/version, nonfinite/object values, duplicate IDs, unknown employer and oversized entries reject.
-- [ ] Add hand-derived negative cases: other job/employer, changed choices/date pattern, missing salary units/consent context, separate sponsorship periods/countries, total/professional years, combined skills, unsupported controls and explicit expiry. A job-exact unfamiliar text question can reuse only its same observed identity/constraints; no equivalent candidate appears for another wording/job.
-- [ ] Run `node --test --test-isolation=none test/answer-bank.test.mjs`; require the intended missing-module/assertion failures before implementation.
-- [ ] Implement the pure contracts and scope allowlist. Preserve the old C-family guard; only independently confirmed punctuation-preserving bank identities can be admitted later.
-- [ ] Run the new tests and existing screening/domain/group suites; require zero failures, then commit the tested deliverable and record Native task completion.
+- [x] Write failing `bank identities preserve punctuation and qualifiers`, `bank candidates require explicit scope and compatible controls`, `retired owners remain visible without supplying values`, and `overlapping scope conflicts are not ranked by recency` tests. Assert `exactQuestionIdentity({label:'Years of C++ experience*'}) !== exactQuestionIdentity({label:'Years of C# experience*'})`; boolean false and numeric zero survive validation unchanged. Unknown scope/version, nonfinite/object values, duplicate IDs, unknown employer and oversized entries reject.
+- [x] Add hand-derived negative cases: other job/employer, changed choices/date pattern, missing salary units/consent context, separate sponsorship periods/countries, total/professional years, combined skills, unsupported controls and explicit expiry. A job-exact unfamiliar text question can reuse only its same observed identity/constraints; no equivalent candidate appears for another wording/job.
+- [x] Run `node --test --test-isolation=none test/answer-bank.test.mjs`; require the intended missing-module/assertion failures before implementation.
+- [x] Implement the pure contracts and scope allowlist. Preserve the old C-family guard; only independently confirmed punctuation-preserving bank identities can be admitted later.
+- [x] Run the new tests and existing screening/domain/group suites; require zero failures, then commit the tested deliverable and record Native task completion.
 
 ## Task 2: Private bank persistence and revision-checked entry mutations
 
