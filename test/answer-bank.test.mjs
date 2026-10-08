@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {emptyAnswerBank,validateAnswerBank,exactQuestionIdentity,describeBankQuestion,bankCandidates,allowedBankScopes} from '../src/answer-bank.mjs';
 export const instant='2026-10-07T12:00:00.000Z';
-export function entry(field,value,scope={kind:'job',jobId:String(field.jobId)},extra={}){return {id:randomUUID(),revision:1,state:'active',value,sourceQuestion:field.label,question:describeBankQuestion(field),scope,confirmedAt:instant,updatedAt:instant,expiresAt:null,provenance:{jobId:String(field.jobId),recordId:'observation'},...extra};}
+export function entry(field,value,scope={kind:'job',jobId:String(field.jobId)},extra={}){return {id:randomUUID(),revision:1,state:'active',value,sourceQuestion:field.label,question:describeBankQuestion(field),scope,confirmedAt:instant,updatedAt:instant,expiresAt:null,provenance:{jobId:String(field.jobId),recordId:'observation',company:field.company||''},...extra};}
 const bank=(...entries)=>({version:1,revision:1,entries});
 const f={label:'School*',type:'text',jobId:'123',company:'A&B, Inc.'};
 test('bank identities preserve punctuation and qualifiers',()=>{
@@ -67,4 +67,18 @@ test('bank unknown wording never gains equivalence or unproven sensitive context
 test('bank schema validates observed consent descriptors without inventing an employer',()=>{
  const sms={...f,label:'Do you consent to receiving text message updates about your application?',type:'checkbox',consentText:'Application updates. Terms v1.'};
  assert.equal(validateAnswerBank(bank(entry(sms,false))).entries.length,1);
+});
+test('bank schema rejects inconsistent ownership and nonnumeric control bounds',()=>{
+ const field={label:'School',type:'text',jobId:'123'},e=entry(field,'UH');
+ assert.throws(()=>validateAnswerBank(bank({...e,scope:{kind:'job',jobId:'456'}})));
+ const n=entry({...field,type:'number'},0);for(const patch of [{min:'not a number'},{step:'0'},{maxLength:'-2'}])assert.throws(()=>validateAnswerBank(bank({...n,question:{...n.question,constraints:{...n.question.constraints,...patch}}})));
+});
+test('bank native dates respect real calendar dates and observed date bounds',()=>{
+ const field={label:'Expected graduation',type:'date',jobId:'123',min:'2027-01-01',max:'2029-12-31'};
+ assert.equal(validateAnswerBank(bank(entry(field,'2028-05-01'))).entries[0].value,'2028-05-01');
+ for(const value of ['2026-01-01','2030-01-01','2028-02-30'])assert.equal(bankCandidates(field,bank(entry(field,value)),{now:instant}).exact.length,0);
+});
+test('bank employer consent requires observed employer and reviewed application purpose',()=>{
+ const marketing={label:'Do you consent to receiving SMS marketing?',type:'checkbox',jobId:'123',company:'Example',consentText:'Marketing texts. Terms v1.'};assert.equal(allowedBankScopes(marketing).length,0);
+ const e=entry(f,'UH',{kind:'employer',employerIdentity:'other employer'});assert.throws(()=>validateAnswerBank(bank(e)));
 });

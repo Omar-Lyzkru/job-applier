@@ -59,7 +59,7 @@ function nonempty(value) {
 function suggestion(question,answer,reason) {return {question,answer,reason};}
 function answerMeaning(value,intent) {
   const key=normalizeQuestion(value);
-  if(['us-authorization','us-sponsorship-now-future','us-sponsorship-now','us-sponsorship-future','current-student'].includes(intent)){
+  if(['us-authorization','us-sponsorship-now-future','us-sponsorship-now','us-sponsorship-future','current-student','sms'].includes(intent)){
     if(value===true||['yes','true','1','agree','i agree'].includes(key))return 'yes';
     if(value===false||['no','false','0','disagree'].includes(key))return 'no';
   }

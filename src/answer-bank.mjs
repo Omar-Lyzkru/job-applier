@@ -20,9 +20,13 @@ export function describeBankQuestion(field){
  context.salaryUnits=units?`${units[1]}:${units[2]}`:null;
  return {version:1,exactIdentity:exactQuestionIdentity(field),descriptor,constraints,context};
 }
+function reviewedApplicationSms(identity){
+ const key=identity.replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+ return /^(?:if you provided a phone number )?do you consent to receiving follow up communication via text message or sms message regarding your application status$/.test(key)||/^(?:do you (?:consent|agree) to|may we) (?:receive|receiving|send you) (?:text|sms) messages? (?:about|regarding) your application(?: status)?$/.test(key)||/^do you consent to (?:receive |receiving )?text message updates about your application(?: status)?$/.test(key);
+}
 function hasContext(question){
  const d=question.descriptor;
- if(d.intent==='sms'||/\bconsent\b/.test(question.exactIdentity))return d.intent==='sms'&&Boolean(question.context.consentIdentity);
+ if(d.intent==='sms'||/\bconsent\b/.test(question.exactIdentity))return d.intent==='sms'&&Boolean(question.context.consentIdentity)&&reviewedApplicationSms(question.exactIdentity);
  if(/\b(?:salary|compensation|pay)\b/.test(question.exactIdentity))return Boolean(question.context.salaryUnits);
  return true;
 }
@@ -58,7 +62,7 @@ export function bankValueCompatible(question,value){
  if(question.descriptor.concept==='experience'&&!['radio','select'].includes(c.type)&&(typeof value==='boolean'||!Number.isFinite(Number(value))||Number(value)<0))return false;
  if(c.maxLength!==null&&String(value).length>Number(c.maxLength))return false;
  if(c.pattern){try{if(!new RegExp(`^(?:${c.pattern})$`,'v').test(String(value)))return false;}catch{return false;}}
- if(c.type==='date'){const v=String(value),date=new Date(`${v}T00:00:00Z`);if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(date.valueOf())||date.toISOString().slice(0,10)!==v)return false;}
+ if(c.type==='date'){const v=String(value);if(!calendarDate(v)||c.min!==null&&v<c.min||c.max!==null&&v>c.max)return false;const step=c.step==='any'?null:Number(c.step??1),days=(Date.parse(v)-Date.parse(c.min||'1970-01-01'))/86400000;if(step!==null&&Math.abs(days/step-Math.round(days/step))>1e-8)return false;}
  if(c.format){
   // Format identity is checked between observations; numeric date hints also constrain the value.
   const units=c.format.match(/yyyy|year|mm|month|dd|day/g),sep=c.format.match(/[/.\-]/)?.[0];
@@ -85,6 +89,7 @@ export function bankCandidates(field,bank,{now=new Date()}={}){
 function object(value,keys,name){if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!keys.includes(k))||keys.some(k=>!Object.hasOwn(value,k)))throw new Error(`Invalid ${name}`);}
 function text(value,max,name){if(typeof value!=='string'||!value.trim()||value.length>max)throw new Error(`Invalid ${name}`);}
 function revision(value,name,min=0){if(!Number.isSafeInteger(value)||value<min)throw new Error(`Invalid ${name}`);}
+function calendarDate(value){const parsed=new Date(`${value}T00:00:00Z`);return typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(parsed.valueOf())&&parsed.toISOString().slice(0,10)===value;}
 function date(value){return typeof value==='string'&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString()===value;}
 export function validateAnswerBank(input){
  object(input,['version','revision','entries'],'answer bank');if(input.version!==1)throw new Error('Unsupported answer bank version');revision(input.revision,'bank revision');
@@ -102,6 +107,9 @@ export function validateAnswerBank(input){
   object(q.constraints,constraintsKeys,'constraints');object(q.context,contextKeys,'context');
   if(typeof q.constraints.type!=='string'||typeof q.constraints.required!=='boolean'||typeof q.constraints.readOnly!=='boolean'||!Array.isArray(q.constraints.choices)||q.constraints.choices.length>200||q.constraints.choices.some(v=>typeof v!=='string'||v.length>2000))throw new Error('Invalid bank controls');
   for(const k of constraintsKeys.filter(k=>!['type','required','readOnly','choices'].includes(k)))if(q.constraints[k]!==null&&(typeof q.constraints[k]!=='string'||q.constraints[k].length>2000))throw new Error('Invalid bank constraint');
+  for(const k of ['min','max'])if(q.constraints[k]!==null&&(q.constraints.type==='date'?!calendarDate(q.constraints[k]):!Number.isFinite(Number(q.constraints[k]))))throw new Error('Invalid numeric control bound');
+  if(q.constraints.step!==null&&q.constraints.step!=='any'&&(!(Number(q.constraints.step)>0)||!Number.isFinite(Number(q.constraints.step))))throw new Error('Invalid numeric step');
+  if(q.constraints.maxLength!==null&&(!Number.isSafeInteger(Number(q.constraints.maxLength))||Number(q.constraints.maxLength)<0))throw new Error('Invalid maximum length');
   for(const k of contextKeys)if(q.context[k]!==null&&(typeof q.context[k]!=='string'||q.context[k].length>2000))throw new Error('Invalid bank context');
   for(const k of ['jurisdiction','timeScope','skill','experienceKind','purpose'])if(q.context[k]!== (q.descriptor.qualifiers[k]??null))throw new Error('Inconsistent bank context');
   if(!date(e.confirmedAt)||!date(e.updatedAt)||e.updatedAt<e.confirmedAt||e.expiresAt!==null&&!date(e.expiresAt))throw new Error('Invalid bank timestamp');
@@ -109,7 +117,10 @@ export function validateAnswerBank(input){
   else if(e.scope?.kind==='employer'){object(e.scope,['kind','employerIdentity'],'employer scope');if(!employerIdentity(e.scope.employerIdentity)||e.scope.employerIdentity!==employerIdentity(e.scope.employerIdentity)||!q.descriptor.intent)throw new Error('Invalid employer scope');}
   else if(e.scope?.kind==='concept'){object(e.scope,['kind','intent','qualifiers'],'concept scope');if(!q.descriptor.intent||q.descriptor.intent==='sms'||e.scope.intent!==q.descriptor.intent||!same(e.scope.qualifiers,q.descriptor.qualifiers))throw new Error('Invalid concept scope');}
   else throw new Error('Invalid bank scope');
-  const p=e.provenance;if(!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).some(k=>!['jobId','recordId','replacementDigest'].includes(k))||!/^\d+$/.test(p.jobId)||typeof p.recordId!=='string'||!p.recordId||p.recordId.length>200)throw new Error('Invalid bank provenance');
+  const p=e.provenance;if(!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).some(k=>!['jobId','recordId','company','replacementDigest'].includes(k))||!/^\d+$/.test(p.jobId)||typeof p.recordId!=='string'||!p.recordId||p.recordId.length>200)throw new Error('Invalid bank provenance');
+  if(e.scope.kind==='job'&&e.scope.jobId!==p.jobId)throw new Error('Inconsistent observed job ownership');
+  if(e.scope.kind==='employer'&&(!p.company||e.scope.employerIdentity!==employerIdentity(p.company)))throw new Error('Inconsistent observed employer ownership');
+  if(p.company!==undefined&&(typeof p.company!=='string'||p.company.length>2000))throw new Error('Invalid observed employer');
   if(p.replacementDigest!==undefined&&!/^[a-f\d]{64}$/.test(p.replacementDigest))throw new Error('Invalid replacement digest');
  }
  if(input.entries.length&&input.revision===0)throw new Error('Inconsistent bank revision');

@@ -435,3 +435,7 @@ test('scoped answers readiness agrees with resolution and never clears protected
  for(const status of ['unconfirmed','submission_pending','submitted']){const result=projectAttention([{...record,status,attemptedAt:'2026-10-07T12:00:00Z'}],pending,{answerBank:bank});assert.equal(result.some(r=>r.singleRetry),false);}
  assert.equal(projectAttention([record],[{...q,type:'unsupported'}],{answerBank:bank})[0].singleRetry,false);
 });
+test('scoped answers agreeing displayed No and boolean false do not create a consent conflict',()=>{
+ const field={label:'Do you consent to receiving text message updates about your application?',type:'radio',options:[{label:'Yes',value:'x'},{label:'No',value:'x'}],jobId:'123',company:'Example',consentText:'Application messages. Terms v1.'};
+ const bank=scopedBank(scopedEntry(field,false),scopedEntry(field,'No',{kind:'employer',employerIdentity:'example'}));const result=resolveAnswer(field,{},{},{answerBank:bank});assert.equal(result.kind,'fill');assert.equal(result.optionLabel,'No');
+});

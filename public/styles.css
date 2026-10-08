@@ -34,3 +34,13 @@ h2{font-size:16px;font-weight:650;letter-spacing:-.3px;margin:0 0 7px}h3{font-si
 
 /* Save feedback keeps dark backgrounds and white text in both appearances. */
 .toast{background:#243b5f}.toast.error{background:#9e4948}
+
+.scoped-answer,.scoped-library-entry,.scoped-retained-draft {border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere;min-width:0;}
+.scoped-answer > summary {cursor:pointer;font-weight:600;color:var(--theme-link);}
+.scoped-content {display:grid;gap:12px;padding-top:12px;min-width:0;}
+.scoped-content p {margin:0;}
+.scoped-content input,.scoped-content select {width:100%;min-width:0;max-width:100%;}
+.scoped-preview {padding:14px;border:1px solid var(--line);border-radius:8px;display:grid;gap:12px;background:var(--palette-f6f8fc);}
+.scoped-preview[hidden] {display:none;}
+.scoped-preview input[type=checkbox] {width:auto;}
+.scoped-library-entry > button {margin:8px 8px 8px 0;}

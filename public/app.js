@@ -43,7 +43,7 @@ function syncControls(){
   byId('stop-button').disabled=!ready||busy||!active;
   byId('browser-button').disabled=!ready||busy||active;
   byId('save-settings').disabled=!ready||busy;byId('save-answer').disabled=!ready||busy;byId('resume-upload').disabled=!ready||busy;
-  document.querySelectorAll('.answer-action').forEach(button=>{button.disabled=!ready||busy;});
+  document.querySelectorAll('.answer-action').forEach(button=>{button.disabled=!ready||busy||button.dataset.bankDisabled==='true';});
   document.querySelectorAll('#settings-form input:not([type=file]),#settings-form textarea,#settings-form select,#new-question,#new-answer').forEach(input=>{input.disabled=!ready;});
   const read=byId('read-resume-keywords');
   read.disabled=!ready||busy||recommendationLoading||!state?.config.resume;
@@ -422,6 +422,81 @@ function appendScreeningExplanation(card,question){
   card.append(details);
 }
 
+const scopedDrafts=new Map();let scopedLibrarySignature='';
+const scopeLabel=scope=>scope.kind==='job'?`This job only: ${scope.jobId}`:scope.kind==='employer'?`This employer: ${scope.employerIdentity}`:`Reusable meaning: ${scope.intent} (${Object.entries(scope.qualifiers).map(([k,v])=>`${k}: ${v}`).join(', ')||'no additional qualifiers'})`;
+function scopedAnswerEditor(meta,entry){
+ const field=meta.field,key=entry?`entry:${entry.id}`:`source:${meta.draftId}`,root=create(entry?'div':'details','scoped-answer');root.dataset.jobId=String(field.jobId||entry?.provenance.jobId||'');root.dataset.draftKey=key;
+ if(!entry)root.append(create('summary',null,`Save with a scope for job ${field.jobId}`));
+ const content=create('div','scoped-content');root.append(content);if(!entry){content.hidden=true;root.addEventListener('toggle',()=>{content.hidden=!root.open;});}
+ content.append(create('p','original-question',field.label),create('p','answer-memory-help',`${field.company||'Employer unavailable'} · job ${field.jobId}`));
+ if(meta.question?.descriptor?.summary)content.append(create('p',null,meta.question.descriptor.summary));
+ if(field.consentText)content.append(create('p','original-question',field.consentText));
+ if(meta.question?.context?.consentIdentity)content.append(create('p','answer-memory-help','Consent applies only to this observed wording and terms. Changed terms require confirmation.'));
+ if(!meta.allowedScopes?.length){content.append(create('p',null,meta.manualReason||'Complete this question directly in LinkedIn.'));return root;}
+ const existing=scopedDrafts.get(key),draft=existing||{label:field.label,jobId:field.jobId,company:field.company,value:entry?answerText(entry.value):meta.savedAnswer!==undefined?answerText(meta.savedAnswer):'',scope:JSON.stringify(entry?.scope||meta.allowedScopes[0]),expiresAt:entry?.expiresAt||''};
+ const input=create(['checkbox','radio','select'].includes(field.type)?'select':'input');
+ if(input.tagName==='SELECT'){
+  const choices=field.type==='checkbox'?['Yes','No']:(field.options||[]).filter(o=>o.value!=='').map(o=>o.label);
+  const placeholder=create('option',null,'Choose an answer');placeholder.value='';input.append(placeholder);
+  for(const label of [...new Set(choices)]){const option=create('option',null,label);option.value=label;input.append(option);}
+  input.value=choices.find(v=>v.toLocaleLowerCase()===String(draft.value).toLocaleLowerCase())||'';
+ }else{input.type=field.type==='number'?'number':field.type==='date'?'date':'text';input.value=draft.value;if(field.type==='number')input.step='any';}
+ content.append(inputLabel('Scoped answer',input));
+ const scopes=create('select');for(const [i,scope] of meta.allowedScopes.entries()){const option=create('option',null,scopeLabel(scope));option.value=String(i);scopes.append(option);}const index=meta.allowedScopes.findIndex(s=>JSON.stringify(s)===draft.scope);scopes.value=String(index<0?0:index);content.append(inputLabel('Reuse scope',scopes));
+ const expiry=create('input');expiry.type='datetime-local';if(draft.expiresAt){const date=new Date(draft.expiresAt);if(!Number.isNaN(date.valueOf()))expiry.value=new Date(date.valueOf()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);}content.append(inputLabel('Expiry (optional)',expiry));
+ const previewBox=create('div','scoped-preview');previewBox.hidden=true;
+ const remember=()=>{draft.value=input.value;draft.scope=JSON.stringify(meta.allowedScopes[Number(scopes.value)]);draft.expiresAt=expiry.value?new Date(expiry.value).toISOString():'';scopedDrafts.set(key,draft);previewBox.hidden=true;previewBox.replaceChildren();};
+ for(const control of [input,scopes,expiry]){control.addEventListener('input',remember);control.addEventListener('change',remember);}
+ const value=(original=entry)=>{
+  if(original&&input.value===answerText(original.value))return original.value;
+  if(field.type==='checkbox'){if(!['Yes','No'].includes(input.value))throw new Error('Choose Yes or No first');return input.value==='Yes';}
+  if(field.type==='number'){if(!input.value.trim()||!Number.isFinite(Number(input.value)))throw new Error('Enter a number first');return Number(input.value);}
+  if(!input.value.trim())throw new Error('Enter an answer first');return input.value.trim();
+ };
+ const preview=create('button','button answer-action','Preview scoped answer');preview.type='button';
+ preview.addEventListener('click',()=>{
+  const chosen=meta.allowedScopes[Number(scopes.value)];
+  const matches=entry?[entry]:(state.answerBank?.entries||[]).filter(e=>e.state==='active'&&e.question.exactIdentity===meta.question.exactIdentity&&JSON.stringify(e.question.constraints)===JSON.stringify(meta.question.constraints)&&JSON.stringify(e.question.context)===JSON.stringify(meta.question.context)&&JSON.stringify(e.scope)===JSON.stringify(chosen));
+  if(matches.length>1){toast('Several confirmations conflict for this scope. Review them in the scoped answer library.',true);return;}
+  const target=matches[0];let typed;try{typed=value(target);remember();}catch(error){toast(error.message,true);return;}
+  const selectedExpiry=draft.expiresAt||null;
+  perform(async()=>{
+   const proposal=await api('/api/answer-bank/preview',target?{entryId:target.id}:{sourceRef:meta.sourceRef});
+   previewBox.replaceChildren(create('p',null,`Confirm answer: ${answerText(typed)}`),create('p',null,scopeLabel(chosen)),create('p',null,`Observed question: ${proposal.sourceQuestion}`));
+   const source=create('p','answer-memory-help',`${proposal.company||'Employer unavailable'} · job ${proposal.jobId}`);previewBox.append(source);
+   if(Object.hasOwn(proposal,'currentValue'))previewBox.append(create('p',null,`Current scoped answer: ${answerText(proposal.currentValue)}`));
+   let replacement;
+   if(proposal.previousExact){previewBox.append(create('p',null,`Previous exact answer: ${answerText(proposal.previousExact.value)}`));replacement=create('input');replacement.type='checkbox';previewBox.append(inputLabel('Replace this previous exact answer for the selected scope',replacement));}
+   const confirm=create('button','button primary answer-action','Confirm and save scoped answer');confirm.type='button';
+   const eligibility=()=>{confirm.dataset.bankDisabled=String(Boolean(replacement&&!replacement.checked));confirm.disabled=busy||confirm.dataset.bankDisabled==='true';};replacement?.addEventListener('change',eligibility);eligibility();
+   confirm.addEventListener('click',()=>perform(async()=>{
+    const payload={...(target?{entryId:target.id,expectedEntryRevision:proposal.entryRevision}:{sourceRef:meta.sourceRef}),expectedBankRevision:proposal.bankRevision,sourceDigest:proposal.sourceDigest,value:typed,scope:chosen,confirmed:true,expiresAt:selectedExpiry,...(proposal.previousExact?{replacementConfirmed:replacement.checked,replacementDigest:proposal.previousExact.digest}:{})};
+    await api('/api/answer-bank/save',payload);scopedDrafts.delete(key);scopedLibrarySignature='';questionSignature='';
+   },'Scoped answer saved. Retry separately to check LinkedIn.'));
+   previewBox.append(confirm);previewBox.hidden=false;
+  });
+ });content.append(preview,previewBox);return root;
+}
+function renderScopedLibrary(){
+ const bank=state.answerBank||{entries:[]},signature=JSON.stringify([bank,state.questions.map(q=>q.bankQuestion?.draftId)]);if(signature===scopedLibrarySignature)return;scopedLibrarySignature=signature;
+ const fragment=document.createDocumentFragment();
+ for(const entry of bank.entries){
+  const card=create('article','scoped-library-entry');card.dataset.entryId=entry.id;card.append(create('h3',null,entry.sourceQuestion),create('p',null,`${answerText(entry.value)} · ${scopeLabel(entry.scope)}`),create('p','answer-memory-help',`${entry.provenance.company||'Employer unavailable'} · observed job ${entry.provenance.jobId}`));
+  if(entry.state==='retired'){card.append(create('p',null,'Retired — no automatic reuse; old legacy values remain blocked in this scope.'));fragment.append(card);continue;}
+  if(entry.expiresAt)card.append(create('p',null,`Expires: ${entry.expiresAt}`));
+  const edit=create('button','button answer-action','Edit scoped answer');edit.type='button';const editorSlot=create('div');
+  edit.addEventListener('click',()=>perform(async()=>{
+   const p=await api('/api/answer-bank/preview',{entryId:entry.id});const meta={field:p.field,question:p.question,allowedScopes:p.allowedScopes};editorSlot.replaceChildren(scopedAnswerEditor(meta,entry));
+  }));
+  const retire=create('button','text-button answer-action','Retire scoped answer');retire.type='button';retire.addEventListener('click',()=>perform(async()=>{await api('/api/answer-bank/retire',{entryId:entry.id,expectedEntryRevision:entry.revision,expectedBankRevision:bank.revision});scopedDrafts.delete(`entry:${entry.id}`);},'Scoped answer retired. Its old value will not return automatically.'));
+  card.append(edit,retire,editorSlot);fragment.append(card);
+ }
+ byId('scoped-answer-library').replaceChildren(fragment);byId('scoped-library-empty').hidden=bank.entries.length>0;
+ const visible=new Set(state.questions.flatMap(q=>q.bankQuestion?[`source:${q.bankQuestion.draftId}`]:[]).concat(bank.entries.filter(e=>e.state==='active').map(e=>`entry:${e.id}`))),retained=[];
+ for(const [key,draft] of scopedDrafts){if(visible.has(key))continue;const row=create('article','scoped-retained-draft');row.append(create('p',null,`Retained edit: ${draft.label} · ${draft.company||'Employer unavailable'} · job ${draft.jobId}`),create('p',null,answerText(draft.value)),create('p',null,'The question or reuse target changed. Review a current question separately; this draft will not be transferred automatically.'));const discard=create('button','text-button answer-action','Discard retained scoped edit');discard.type='button';discard.addEventListener('click',()=>{scopedDrafts.delete(key);scopedLibrarySignature='';renderScopedLibrary();});row.append(discard);retained.push(row);}
+ byId('retained-scoped-drafts').replaceChildren(...retained);byId('retained-scoped-drafts').hidden=!retained.length;
+}
+
 function renderQuestions(){
   const groups=state.questionGroups||[],signature=JSON.stringify(groups);if(signature===questionSignature)return;questionSignature=signature;
   const counts=new Map();for(const group of groups)counts.set(group.draftId,(counts.get(group.draftId)||0)+1);
@@ -449,7 +524,9 @@ function renderQuestions(){
       if(occurrence.blocker)item.append(create('p','question-blocker',occurrence.blocker==='missing_answer'?'Waiting for your answer':'LinkedIn entry needs attention'));
       details.append(item);
     }
-    card.append(details);sections.get(question.answerStatus||'needs_answer').append(card);
+    card.append(details);
+    const scopedSeen=new Set();for(const occurrence of group.occurrences){const meta=occurrence.bankQuestion;if(!meta||scopedSeen.has(meta.draftId))continue;scopedSeen.add(meta.draftId);card.append(scopedAnswerEditor({...meta,savedAnswer:occurrence.savedAnswer?.answer}));}
+    sections.get(question.answerStatus||'needs_answer').append(card);
   }
   for(const section of sections.values())if(section.querySelector('.pending-question'))fragment.append(section);
   byId('pending-questions').replaceChildren(fragment);byId('questions-empty').hidden=groups.length>0;renderRetainedDrafts(groups);
@@ -524,7 +601,7 @@ function render(){
   byId('resume-step').classList.toggle('complete',Boolean(config.resume));
   byId('resume-name').textContent=config.resume?.filename||'No résumé uploaded';byId('resume-detail').textContent=config.resume?`${Math.ceil(config.resume.size/1000)} KB · ready to use`:'PDF, DOC, or DOCX · up to 2 MB';
   if((config.resume?.path||'')!==recommendationResume)clearRecommendations(config.resume);
-  renderHistory();renderAttention();renderQuestions();renderCommonQuestions();renderSmsConsent();renderRecognizedAnswers();renderLibrary();syncControls();
+  renderHistory();renderAttention();renderQuestions();renderCommonQuestions();renderSmsConsent();renderRecognizedAnswers();renderLibrary();renderScopedLibrary();syncControls();
 }
 async function refresh(){
   state=await api('/api/bootstrap');const first=!ready;ready=true;if(first)fillSettings();render();

@@ -506,3 +506,44 @@ test('answer status separates saved entry failures from unanswered information w
  await store.saveQuestions([{...radio,options:[{label:'Weekdays only',value:'w'}]}]);
  const incompatible=await read();assert.equal(incompatible.questions[0].answerStatus,'needs_answer');assert.equal(incompatible.answerStatusCounts.needsAnswer,1);
 });
+
+async function observedBank(t,extra={}){
+ const ctx=await setup(t,{retry:true});const record=await ctx.store.createRecord({id:'123',title:'Intern',company:'A&B, Inc.',url:'https://www.linkedin.com/jobs/view/123/'},'needs_answer');
+ const q={label:'Years of professional Python experience',key:'years of professional python experience',type:'number',required:true,min:'0',max:'10',step:'1',jobId:'123',recordId:record.id,blocker:'missing_answer',...extra};await ctx.store.saveQuestions([q]);
+ const data=await (await fetch(ctx.app.url+'/api/bootstrap')).json();return {...ctx,q,data};
+}
+test('scoped answers API preview derives source without writes and saves typed zero only in bank',async t=>{
+ const {dir,store,send,data,commands,app}=await observedBank(t);const meta=data.questions[0].bankQuestion;assert.ok(meta.sourceRef);assert.equal(meta.allowedScopes[0].kind,'job');
+ const before=await readFile(join(dir,'questions.json'));const preview=await send('/api/answer-bank/preview',{sourceRef:meta.sourceRef});assert.equal(preview.status,200);const p=await preview.json();assert.equal(p.sourceQuestion,'Years of professional Python experience');assert.equal(p.company,'A&B, Inc.');assert.equal((await store.getAnswerBank()).revision,0);await assert.rejects(readFile(join(dir,'answer-bank.json')),/ENOENT/);
+ const result=await send('/api/answer-bank/save',{sourceRef:meta.sourceRef,expectedBankRevision:p.bankRevision,sourceDigest:p.sourceDigest,value:0,scope:p.allowedScopes[0],confirmed:true});assert.equal(result.status,200);assert.equal((await store.getAnswerBank()).entries[0].value,0);assert.deepEqual(await readFile(join(dir,'questions.json')),before);assert.deepEqual(await store.getAnswers(),{});assert.deepEqual(commands,[]);
+ const current=await (await fetch(app.url+'/api/bootstrap')).json();assert.equal(current.attention[0].answerProgress.unanswered,0);assert.equal(current.attention[0].singleRetry,true);assert.equal(current.answerBank.revision,1);
+});
+test('scoped answers API requires explicit legacy replacement and stale source bank value revisions reject',async t=>{
+ const {store,send,data,q,app}=await observedBank(t);await store.saveAnswers({[q.label]:4});const sourceRef=data.questions[0].bankQuestion.sourceRef;
+ const p=await (await send('/api/answer-bank/preview',{sourceRef})).json();assert.equal(p.previousExact.value,4);
+ const body={sourceRef,expectedBankRevision:0,sourceDigest:p.sourceDigest,value:0,scope:p.allowedScopes[0],confirmed:true,replacementDigest:p.previousExact.digest};
+ assert.equal((await send('/api/answer-bank/save',body)).status,400);
+ await store.saveAnswers({[q.label]:5});assert.equal((await send('/api/answer-bank/save',{...body,replacementConfirmed:true})).status,409);
+ await store.saveAnswers({[q.label]:4});await store.saveQuestions([{...q,max:'8'}]);assert.equal((await send('/api/answer-bank/save',{...body,replacementConfirmed:true})).status,409);
+ const current=await (await fetch(app.url+'/api/bootstrap')).json(),ref=current.questions[0]?.bankQuestion?.sourceRef||sourceRef;
+ const fresh=await (await send('/api/answer-bank/preview',{sourceRef:ref})).json();const save={...body,sourceRef:ref,sourceDigest:fresh.sourceDigest,replacementConfirmed:true};assert.equal((await send('/api/answer-bank/save',save)).status,200);assert.equal((await send('/api/answer-bank/save',save)).status,409);
+});
+test('scoped answers API edits immutable observations retires ownership and rejects invalid or unauthorized commands',async t=>{
+ const {store,send,data,commands,app}=await observedBank(t,{label:'Would you relocate?',type:'checkbox'});const ref=data.questions[0].bankQuestion.sourceRef,p=await (await send('/api/answer-bank/preview',{sourceRef:ref})).json();
+ const create={sourceRef:ref,expectedBankRevision:0,sourceDigest:p.sourceDigest,value:false,scope:p.allowedScopes[0],confirmed:true};
+ assert.equal((await send('/api/answer-bank/save',{...create,scope:{kind:'concept',intent:'willingness',qualifiers:{}}})).status,400);
+ assert.equal((await send('/api/answer-bank/save',create,{'X-App-Token':''})).status,403);assert.equal((await send('/api/answer-bank/save',create,{Origin:'https://evil.example'})).status,403);
+ assert.equal((await send('/api/answer-bank/save',{...create,question:{fake:true}})).status,400);
+ assert.equal((await send('/api/answer-bank/save',create)).status,200);const entry=(await store.getAnswerBank()).entries[0],edit=await (await send('/api/answer-bank/preview',{entryId:entry.id})).json();
+ const update={entryId:entry.id,expectedEntryRevision:1,expectedBankRevision:1,sourceDigest:edit.sourceDigest,value:true,scope:edit.allowedScopes[0],confirmed:true};
+ assert.equal((await send('/api/answer-bank/save',{...update,expectedEntryRevision:0})).status,409);assert.equal((await send('/api/answer-bank/save',update)).status,200);
+ assert.equal((await send('/api/answer-bank/retire',{entryId:entry.id,expectedEntryRevision:1,expectedBankRevision:2})).status,409);
+ assert.equal((await send('/api/answer-bank/retire',{entryId:entry.id,expectedEntryRevision:2,expectedBankRevision:2})).status,200);assert.equal((await store.getAnswerBank()).entries[0].state,'retired');assert.deepEqual(commands,[]);
+ assert.equal((await send('/api/answer-bank/preview',{entryId:entry.id})).status,409);assert.equal((await (await fetch(app.url+'/api/bootstrap')).json()).attention[0].singleRetry,false);
+});
+test('scoped answers API rejects invalid control values unknown consent and source edits queued before commit',async t=>{
+ const {store,send,data,q}=await observedBank(t);let ref=data.questions[0].bankQuestion.sourceRef,p=await (await send('/api/answer-bank/preview',{sourceRef:ref})).json();
+ const body={sourceRef:ref,expectedBankRevision:0,sourceDigest:p.sourceDigest,value:11,scope:p.allowedScopes[0],confirmed:true};assert.equal((await send('/api/answer-bank/save',body)).status,400);
+ const save=store.saveBankEntry;store.saveBankEntry=async command=>{await store.saveQuestions([{...q,step:'2'}]);return save(command);};assert.equal((await send('/api/answer-bank/save',{...body,value:0})).status,409);store.saveBankEntry=save;assert.equal((await store.getAnswerBank()).revision,0);
+ await store.saveQuestions([{...q,label:'Consent to SMS marketing',company:'Unknown'}]);assert.equal((await send('/api/answer-bank/preview',{sourceRef:ref})).status,409);
+});

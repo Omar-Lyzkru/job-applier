@@ -95,7 +95,8 @@ export async function createStore(dataDir) {
         if(old?.state==='retired')stale('Bank entry is retired');
         if(old&&command.expectedEntryRevision!==old.revision)stale('Stale bank entry revision');
         if(old&&(bankDigest(old.question)!==bankDigest(command.question)||old.sourceQuestion!==command.sourceQuestion||bankDigest(old.provenance)!==bankDigest(command.provenance)))throw new Error('Bank source is immutable');
-        if(command.provenance?.replacementDigest!==undefined){
+        command.validateObservation?.(clone({history:state.history,questions:state.questions,answers:state.answers,answerBank:state.answerBank}));
+        if(!old&&command.provenance?.replacementDigest!==undefined){
           if(command.replacementConfirmed!==true)throw new Error('Explicit replacement confirmation is required');
           if(!Object.hasOwn(state.answers,command.legacyKey)||bankDigest(state.answers[command.legacyKey])!==command.provenance.replacementDigest)stale('Legacy replacement value changed');
         }

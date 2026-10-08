@@ -1,3 +1,4 @@
+import {describeBankQuestion,allowedBankScopes,bankDigest,bankValueCompatible,exactQuestionIdentity} from './answer-bank.mjs';
 import {createServer} from 'node:http';
 import {mkdir,readFile,open} from 'node:fs/promises';
 import {resolve,dirname,basename,extname,join} from 'node:path';
@@ -39,6 +40,36 @@ function csvCell(value){
   if(/^\s*[=+\-@]/.test(text)||/^[\t\r]/.test(text))text="'"+text;
   return '"'+text.replaceAll('"','""')+'"';
 }
+function bankSources(history,raw){
+ const jobs=new Map(history.map(r=>[String(r.job.id),r]));
+ return projectQuestions(history,raw).map(original=>{
+  const record=jobs.get(String(original.jobId)),job=record?.job||{};
+  const field={...original,jobId:String(original.jobId||''),company:original.company||job.company||''};
+  const sourceRef=bankDigest([original.recordId||record?.id||'legacy',field.jobId,exactQuestionIdentity(field)]);
+  const question=describeBankQuestion(field),allowedScopes=allowedBankScopes(field);
+  const source={sourceRef,field,question,allowedScopes,sourceQuestion:field.label,jobId:field.jobId,recordId:original.recordId||record?.id||`legacy:${field.jobId}`,company:field.company,jobTitle:job.title||''};
+  source.sourceDigest=bankDigest(source);
+  return source;
+ });
+}
+function bankMetadata(source){return {sourceRef:source.sourceRef,sourceDigest:source.sourceDigest,draftId:bankDigest([source.jobId,source.company,source.question]),allowedScopes:source.allowedScopes,field:source.field,question:source.question,manualReason:source.allowedScopes.length?'':'This control or its required employer, consent terms or salary units needs manual confirmation in LinkedIn.'};}
+function storedSource(entry){
+ const c=entry.question.constraints,field={label:entry.sourceQuestion,type:c.type,required:c.required,readOnly:c.readOnly,jobId:entry.provenance.jobId,company:entry.provenance.company||'',options:c.choices.map(label=>({label,value:label})),pattern:c.pattern,placeholder:c.format,min:c.min,max:c.max,step:c.step,maxLength:c.maxLength};
+ const allowedScopes=[{kind:'job',jobId:entry.provenance.jobId}];
+ if(entry.question.descriptor.intent&&entry.question.descriptor.matchPolicy==='known'){
+  if(entry.provenance.company){const employer=allowedBankScopes({...field,consentText:entry.question.context.consentIdentity?'Stored confirmed terms':undefined}).find(s=>s.kind==='employer');if(employer)allowedScopes.push(employer);}
+  if(entry.question.descriptor.intent!=='sms')allowedScopes.push({kind:'concept',intent:entry.question.descriptor.intent,qualifiers:entry.question.descriptor.qualifiers});
+ }
+ const source={entryId:entry.id,entryRevision:entry.revision,field,question:entry.question,allowedScopes,sourceQuestion:entry.sourceQuestion,jobId:entry.provenance.jobId,recordId:entry.provenance.recordId,company:entry.provenance.company||'',currentValue:entry.value,scope:entry.scope,expiresAt:entry.expiresAt};source.sourceDigest=bankDigest(source);return source;
+}
+function bankProposal(input,inputs,history,raw){
+ const {answerBank,answers}=inputs;let source,entry;
+ if(Boolean(input.entryId)===Boolean(input.sourceRef))throw failure('Choose one observed source or existing entry');
+ if(input.entryId){entry=answerBank.entries.find(e=>e.id===input.entryId);if(!entry||entry.state==='retired')throw failure('Entry is missing or retired',409);source=storedSource(entry);}
+ else{const candidates=bankSources(history,raw).filter(o=>o.sourceRef===input.sourceRef);if(!candidates.length||new Set(candidates.map(o=>o.sourceDigest)).size!==1)throw failure('Observed question changed or is no longer available. Refresh and preview again.',409);source=candidates[0];}
+ const legacyKey=savedAnswerKey(source.field),previousExact=Object.hasOwn(answers,legacyKey)?{key:legacyKey,value:answers[legacyKey],digest:bankDigest(answers[legacyKey])}:null;
+ return {...source,bankRevision:answerBank.revision,previousExact,...(entry?{entry}:{} )};
+}
 export async function createApp({dataDir=resolve(root,'data'),store,runner,port=3210}={}){
   store ||= await createStore(dataDir);
   try{await store.recoverWork();}catch(error){await store.close();throw error;}
@@ -76,21 +107,24 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
         send({diagnostic});return;
       }
       if(req.method==='GET' && path==='/api/bootstrap'){
-        const config=await store.getConfig(),answers=await store.getAnswers(),history=await store.getHistory();
+        const {config,answers,answerBank}=await store.getRunInputs(),history=await store.getHistory();
         const pending=projectQuestions(history,await store.getQuestions()),questions=[],reusedAnswers=history.slice(-30).flatMap(record=>Array.isArray(record.answerMatches)?record.answerMatches:[])
           .filter(match=>Object.hasOwn(answers,match.sourceQuestion)&&Object.is(answers[match.sourceQuestion],match.answer));
         const jobs=new Map(history.map(record=>[record.job.id,record.job]));
+        const sources=bankSources(history,pending);
         for(const original of pending){
           const job=jobs.get(original.jobId);
           const question={...original,company:original.company||job?.company||'',jobTitle:job?.title||'',jobUrl:job?.url||''};
+          const observed=sources.find(o=>o.field.jobId===String(question.jobId)&&o.field.label===question.label&&o.field.type===question.type);
+          if(observed)question.bankQuestion=bankMetadata(observed);
           question.answerKey=savedAnswerKey(question);
           question.description=describeQuestion(question);
-          const resolution=resolveAnswer(question,config.profile,answers);
+          const resolution=resolveAnswer(question,config.profile,answers,{answerBank});
           question.screeningExplanation=explainScreeningResolution(question,resolution);
           question.resolutionReason=resolution.reason||'';
           question.answerStatus=question.type==='unsupported'||resolution.manual||(question.type==='checkbox'&&question.required&&resolution.kind==='fill'&&resolution.value===false)?'manual':resolution.kind==='fill'?'saved_retry':'needs_answer';
           question.suggestions=resolution.suggestions||[];
-          if(resolution.kind==='fill')question.savedAnswer={answer:resolution.answer,displayAnswer:resolution.optionLabel??resolution.value,sourceQuestion:resolution.sourceQuestion,match:resolution.match,source:resolution.source};
+          if(resolution.kind==='fill')question.savedAnswer={answer:resolution.answer,displayAnswer:resolution.optionLabel??resolution.value,sourceQuestion:resolution.sourceQuestion,match:resolution.match,source:resolution.source,...(resolution.entryId?{entryId:resolution.entryId,entryRevision:resolution.entryRevision,bankRevision:resolution.bankRevision,answerScope:resolution.answerScope}:{})};
           if(resolution.manual){question.type='unsupported';question.blocker='operational';question.reason=resolution.reason;}
           // Saving an answer only resolves missing information. Entry/verification
           // failures remain pending until a later successful application clears them.
@@ -120,10 +154,10 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
         for(const group of questionGroups)answerStatusCounts[({needs_answer:'needsAnswer',saved_retry:'savedRetry',manual:'manual'})[group.question.answerStatus]]++;
         const jobIds=new Set(questions.map(question=>String(question.jobId??'').trim()).filter(id=>id&&!['unknown','undefined','null'].includes(id.toLowerCase())));
         const questionCounts={distinctQuestions:questionGroups.length,affectedApplications:jobIds.size,occurrences:questions.length};
-        const attention=projectAttention(history,pending,{profile:config.profile,answers});
+        const attention=projectAttention(history,pending,{profile:config.profile,answers,answerBank});
         const attentionCounts={total:attention.length,ready:attention.filter(item=>item.readyForBatch).length,manual:attention.filter(item=>item.blockers.some(blocker=>blockerPolicy(blocker.code).manual)).length,interrupted:attention.filter(item=>item.status==='interrupted').length,unconfirmed:attention.filter(item=>['unconfirmed','submission_pending'].includes(item.status)).length};
         const displayed=history.map((record,index)=>({record,index,time:Date.parse(record.updatedAt||record.finishedAt||record.startedAt)||0})).sort((a,b)=>b.time-a.time||b.index-a.index).slice(0,200).map(({record})=>record);
-        send({config,answers,questions,questionGroups,questionCounts,answerStatusCounts,answerMemory,intelligenceOptions,attention,attentionCounts,history:displayed,status:await status(),readiness:readiness(config),token});return;
+        send({config,answers,answerBank,questions,questionGroups,questionCounts,answerStatusCounts,answerMemory,intelligenceOptions,attention,attentionCounts,history:displayed,status:await status(),readiness:readiness(config),token});return;
       }
       if(req.method==='GET' && path==='/api/status'){send(await status());return;}
       if(req.method==='GET' && path==='/api/history.csv'){
@@ -159,15 +193,40 @@ export async function createApp({dataDir=resolve(root,'data'),store,runner,port=
         const input=await readJson(req);if(!input||typeof input!=='object'||Array.isArray(input))throw failure('Settings must be an object');
         const previous=await store.getConfig();send({config:await store.saveConfig({...input,resume:previous.resume})});return;
       }
+      if(req.method==='POST'&&path.startsWith('/api/answer-bank/')){
+        const input=await readJson(req),action=path.slice('/api/answer-bank/'.length);
+        const allowed=action==='preview'?['sourceRef','entryId']:action==='retire'?['entryId','expectedBankRevision','expectedEntryRevision']:['sourceRef','entryId','expectedEntryRevision','expectedBankRevision','sourceDigest','value','scope','confirmed','replacementConfirmed','replacementDigest','expiresAt'];
+        if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!allowed.includes(k)))throw failure('Invalid scoped answer command');
+        if(action==='retire'){send({answerBank:await store.retireBankEntry(input)});return;}
+        if(!['preview','save'].includes(action))throw failure('Not found',404);
+        const inputs=await store.getRunInputs(),history=await store.getHistory(),raw=await store.getQuestions();
+        const proposal=bankProposal(input,inputs,history,raw);
+        if(action==='preview'){const {entry,...preview}=proposal;send(preview);return;}
+        if(input.expectedBankRevision!==inputs.answerBank.revision||input.sourceDigest!==proposal.sourceDigest)throw failure('Preview is stale. Refresh and preview again.',409);
+        if(input.confirmed!==true)throw failure('Confirm the displayed answer and scope first');
+        if(!proposal.allowedScopes.some(scope=>bankDigest(scope)===bankDigest(input.scope)))throw failure('This reuse scope is unavailable for the observed question');
+        if(!bankValueCompatible(proposal.question,input.value))throw failure('Answer does not match the observed choices, format, limits or required context');
+        if(proposal.previousExact){
+          if(input.replacementConfirmed!==true)throw failure('Confirm replacement of the displayed previous exact answer');
+          if(input.replacementDigest!==proposal.previousExact.digest)throw failure('Previous exact answer changed. Preview again.',409);
+        }else if(input.replacementDigest!==undefined)throw failure('Previous exact answer changed. Preview again.',409);
+        const provenance=proposal.entry?.provenance||{jobId:proposal.jobId,recordId:proposal.recordId,company:proposal.company,...(proposal.previousExact?{replacementDigest:proposal.previousExact.digest}:{})};
+        const command={expectedBankRevision:input.expectedBankRevision,entryId:input.entryId,expectedEntryRevision:input.expectedEntryRevision,sourceQuestion:proposal.sourceQuestion,question:proposal.question,scope:input.scope,value:input.value,confirmed:true,expiresAt:Object.hasOwn(input,'expiresAt')?input.expiresAt:proposal.expiresAt??null,provenance,replacementConfirmed:input.replacementConfirmed,legacyKey:proposal.previousExact?.key,
+          validateObservation:current=>{
+            const fresh=bankProposal(input,{answers:current.answers,answerBank:current.answerBank},current.history,current.questions);
+            if(fresh.sourceDigest!==proposal.sourceDigest||fresh.previousExact?.digest!==proposal.previousExact?.digest)throw failure('Observed source or previous exact answer changed. Preview again.',409);
+          }};
+        send({answerBank:await store.saveBankEntry(command)});return;
+      }
       if(req.method==='POST' && path==='/api/answers'){send({answers:await store.saveAnswers(await readJson(req))});return;}
       if(req.method==='POST' && path==='/api/run'){await runner.start(await readJson(req));send(await status());return;}
       if(req.method==='POST'&&path==='/api/retry'){
         const input=await readJson(req);
         if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['recordIds','dryRun'].includes(key))||!Array.isArray(input.recordIds)||input.recordIds.length<1||input.recordIds.length>100||input.recordIds.some(id=>typeof id!=='string'||!id)||new Set(input.recordIds).size!==input.recordIds.length||Object.hasOwn(input,'dryRun')&&typeof input.dryRun!=='boolean')throw failure('Retry needs 1–100 unique record IDs and an optional true/false dry run');
         if(['running','stopping'].includes(runner.getStatus().state))throw failure('Stop the active run before retrying applications',409);
-        const history=await store.getHistory(),config=await store.getConfig(),answers=await store.getAnswers();
+        const history=await store.getHistory(),{config,answers,answerBank}=await store.getRunInputs();
         if(input.recordIds.some(id=>!history.some(record=>record.id===id)))throw failure('Unknown application record');
-        const attention=projectAttention(history,await store.getQuestions(),{profile:config.profile,answers});
+        const attention=projectAttention(history,await store.getQuestions(),{profile:config.profile,answers,answerBank});
         if(input.recordIds.some(id=>{const item=attention.find(item=>item.recordId===id);return !item?.singleRetry||input.recordIds.length>1&&!item.readyForBatch;}))throw failure('Selected application is not eligible or ready for retry',409);
         await runner.retry(input);send(await status());return;
       }
