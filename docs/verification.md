@@ -854,3 +854,16 @@ zero failures; browser duration 324254 ms. Earlier pre-review browser run passed
 JavaScript syntax and git diff whitespace checks pass. One Important review
 finding fixed with RED→GREEN tests; no newly deferred Minor findings. Product
 is ready for the previously authorized maintenance delivery; 3C remains paused.
+
+
+Maintenance delivery completed: release `21110dc` fast-forwarded into primary
+main and GitHub main matched its full revision. Merged-result unit/API suite
+passed 242/242. The verified idle dashboard was gracefully stopped only after
+confirming its exact process/check-out identity; an exclusive-owner backup covered
+config, shared answers, questions, history, bank if present and selected résumé
+bytes. After restart, every saved data file and the selected résumé were identical;
+all **410 history records**, identity/order/attempt timestamps matched. Startup
+was idle with **zero application attempts**. Earlier 364-record phase notes are
+historical; maintenance proof reflects current user activity. No live application
+or applicant value was changed by tests. Private failed/passing logs and review
+proof were preserved before native worktree cleanup. Phase 3C stays paused.
